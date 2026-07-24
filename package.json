@@ -1,0 +1,12 @@
+{
+  "name": "dogfight-relay-server",
+  "version": "1.0.0",
+  "description": "航空格闘戦シミュレーター用のオンライン対戦 中継サーバー（ランダムマッチ／フレンドマッチ）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
