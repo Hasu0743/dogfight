@@ -1,0 +1,2427 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>航空格闘戦 F-16 vs Su-27</title>
+<style>
+  /* ============================================================
+     0. 基本リセット
+     ============================================================ */
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { font-family: "Segoe UI", sans-serif; color: #eafff0; }
+  #hud {
+    position: absolute; inset: 0; pointer-events: none;
+    text-shadow: 0 0 4px #000, 0 0 2px #000;
+  }
+
+  /* ============================================================
+     1. HUDパネル（自機・敵機ステータス、操作説明）
+     ============================================================ */
+  .panel {
+    position: absolute; font-size: 15px; line-height: 1.5;
+  }
+  #topleft { top: 14px; left: 14px; }
+  #topright { top: 14px; right: 14px; text-align: right; color: #cdeedb; }
+  #topright .label { color: #7fd6a8; }
+  #enemyStatClose {
+    position: absolute; top: -6px; right: -6px; width: 20px; height: 20px;
+    background: rgba(255,255,255,0.12); color: #fff; border: 1px solid rgba(255,255,255,0.4);
+    border-radius: 50%; cursor: pointer; font-size: 13px; line-height: 1; pointer-events: auto;
+    padding: 0;
+  }
+  #bottomleft { bottom: 14px; left: 14px; font-size: 13px; color: #9fd6b0; }
+  .big { font-size: 22px; font-weight: bold; margin-bottom: 2px; }
+  .label { font-size: 11px; color: #9fd6b0; letter-spacing: 1px; margin-top: 2px; }
+
+  /* ============================================================
+     2. 被弾/照準ゲージ・GUNS!フラッシュ
+     ============================================================ */
+  #bottomright { bottom: 14px; right: 14px; width: 220px; }
+  .meterWrap { margin-top: 6px; }
+  .meterBar { height: 10px; width: 100%; background: #333; border: 1px solid #555; border-radius: 4px; overflow: hidden; }
+  .meterFill { height: 100%; width: 0%; transition: width 0.1s linear; }
+  #playerMeterFill { background: linear-gradient(90deg,#ffd166,#ef476f); }
+  #enemyMeterFill { background: linear-gradient(90deg,#8ce99a,#06d6a0); }
+  #gunsFlash {
+    position: absolute; top: 44%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 34px; font-weight: bold; color: #ff3b3b; text-shadow: 0 0 12px #ff0000;
+    opacity: 0; transition: opacity 0.1s;
+  }
+
+  /* ============================================================
+     3. STALL警告
+     ============================================================ */
+  #stallWarn {
+    position: absolute; top: 28%; left: 50%; transform: translate(-50%, -50%);
+    color: #ff2b2b; font-weight: 900; font-size: 52px; letter-spacing: 6px;
+    text-shadow: 0 0 18px #ff0000, 0 0 6px #000;
+    display: none;
+    animation: stallBlink 0.45s steps(1) infinite;
+  }
+  @keyframes stallBlink { 50% { opacity: 0.2; } }
+
+  #flapsWarn {
+    position: absolute; top: 35%; left: 50%; transform: translate(-50%, -50%);
+    color: #6fe08a; font-weight: 700; font-size: 22px; letter-spacing: 3px;
+    text-shadow: 0 0 10px #0a0, 0 0 4px #000;
+    display: none;
+  }
+
+  /* ============================================================
+     4. 敵機位置インジケーター（画面内マーカー/画面外矢印）
+     ============================================================ */
+  #enemyIndicator {
+    position: absolute; pointer-events: none; transform: translate(-50%, -50%);
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+  }
+  #enemyArrow {
+    color: #ff5252; font-size: 22px; line-height: 1; text-shadow: 0 0 6px #ff0000;
+  }
+  #enemyDist {
+    color: #ff8a8a; font-size: 12px; font-weight: bold; white-space: nowrap;
+  }
+
+  /* ============================================================
+     5. 姿勢指示計（ADI）
+     ============================================================ */
+  #adi {
+    position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+    width: 160px; height: 160px; border-radius: 50%; overflow: hidden;
+    border: 3px solid #cfd8dc; box-shadow: 0 0 12px rgba(0,0,0,0.7);
+    background: #000;
+  }
+  #adiHorizon {
+    position: absolute; left: 50%; top: 50%; width: 420px; height: 420px;
+    margin-left: -210px; margin-top: -210px;
+  }
+  #adiSky { position: absolute; left: 0; top: 0; width: 100%; height: 50%; background: linear-gradient(#1f5fc4, #6dabf5); }
+  #adiGround { position: absolute; left: 0; top: 50%; width: 100%; height: 50%; background: linear-gradient(#7a5230, #40301f); }
+  #adiHorizonLine { position: absolute; left: 0; top: 209px; width: 100%; height: 2px; background: #fff; }
+  .adiTick { position: absolute; left: 50%; height: 2px; background: #eaf6ff; }
+  #adiAircraftSymbol {
+    position: absolute; left: 50%; top: 50%; width: 96px; height: 20px; margin-left: -48px; margin-top: -10px;
+    pointer-events: none; z-index: 5;
+  }
+  #adiAircraftSymbol .wing { position: absolute; top: 8px; width: 36px; height: 4px; background: #ffd400; border: 1px solid #000; }
+  #adiAircraftSymbol .wingL { left: 0; }
+  #adiAircraftSymbol .wingR { right: 0; }
+  #adiAircraftSymbol .dot { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin-left: -4px; margin-top: -4px; background: #ffd400; border: 1px solid #000; border-radius: 50%; }
+  #adiBankPointer {
+    position: absolute; left: 50%; top: 4px; width: 0; height: 0; margin-left: -6px;
+    border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 9px solid #ffd400;
+    transform-origin: 50% 76px; z-index: 6;
+  }
+  #adiLabel {
+    position: absolute; left: 50%; bottom: -20px; transform: translateX(-50%);
+    font-size: 11px; color: #9fd6b0; letter-spacing: 1px; white-space: nowrap;
+  }
+
+  /* ============================================================
+     6. 開始/終了メッセージ・メニュー画面（共通）
+     ============================================================ */
+  #center-message {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    text-align: center; pointer-events: auto;
+    width: min(560px, 92vw); max-height: 88vh; overflow-y: auto;
+    padding: 4px 8px;
+  }
+  #center-message h1 { font-size: 28px; margin: 0 0 10px; }
+  #center-message p { font-size: 14px; color: #cde; line-height: 1.7; }
+  .screen { display: none; }
+  .screen.active { display: block; }
+  .menuButtons { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; align-items: stretch; }
+  .menuBtn {
+    padding: 10px 26px; font-size: 16px; cursor: pointer;
+    background: #06d6a0; border: none; border-radius: 6px; color: #012; font-weight: bold;
+  }
+  .menuBtn.secondary { background: #3a4750; color: #eafff0; }
+  .menuBtn:disabled { opacity: 0.6; cursor: default; }
+  .menuNote { color: #ffd166; font-size: 13px; min-height: 1.4em; white-space: pre-line; }
+
+  /* ============================================================
+     7. オンライン対戦・機体選択 UI
+     ============================================================ */
+  .serverRow {
+    margin-top: 14px; font-size: 12px; color: #9fd6b0;
+    display: flex; flex-direction: column; gap: 4px; align-items: center;
+  }
+  .serverRow input, #roomCodeInput {
+    padding: 6px 10px; border-radius: 4px; border: 1px solid #567;
+    background: #0b1620; color: #eafff0; font-size: 13px; text-align: center;
+  }
+  .serverRow input { width: 220px; }
+  #roomCodeInput { width: 140px; font-size: 20px; letter-spacing: 4px; margin-top: 8px; }
+  #aircraftGrid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 10px; margin-top: 14px; max-height: 46vh; overflow-y: auto; padding: 4px;
+  }
+  .aircraftCard {
+    border: 2px solid #345; border-radius: 8px; padding: 10px; cursor: pointer;
+    background: rgba(255,255,255,0.04); transition: border-color 0.15s, background 0.15s;
+    text-align: left;
+  }
+  .aircraftCard:hover { border-color: #06d6a0; }
+  .aircraftCard.selected { border-color: #06d6a0; background: rgba(6,214,160,0.15); }
+  .acSwatch { width: 100%; height: 22px; border-radius: 4px; margin-bottom: 6px; border: 1px solid rgba(255,255,255,0.3); }
+  .acName { font-weight: bold; font-size: 14px; margin-bottom: 4px; }
+  .acSpecs { font-size: 11px; color: #bcd; }
+  .specRow { display: flex; justify-content: space-between; gap: 6px; }
+
+  /* ============================================================
+     8. フィードバック送信
+     ============================================================ */
+  #feedbackBtn {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    pointer-events: auto; cursor: pointer; z-index: 500;
+    background: rgba(20,30,25,0.7); color: #9fd6b0; border: 1px solid #3a4750;
+    border-radius: 6px; padding: 5px 10px; font-size: 12px;
+  }
+  #feedbackBtn:hover { background: rgba(6,214,160,0.2); border-color: #06d6a0; }
+  #feedbackPanel {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    pointer-events: auto; display: none; z-index: 1000;
+    width: min(420px, 88vw); background: rgba(10,16,20,0.95); border: 1px solid #3a4750;
+    border-radius: 10px; padding: 16px; text-align: left;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+  }
+  #feedbackPanel.active { display: block; }
+  #feedbackPanel h2 { margin: 0 0 8px; font-size: 16px; }
+  #feedbackText {
+    width: 100%; height: 100px; resize: vertical; box-sizing: border-box;
+    background: #0b1620; color: #eafff0; border: 1px solid #567; border-radius: 6px;
+    padding: 8px; font-size: 13px; font-family: inherit;
+  }
+  #feedbackStatus { color: #7fd6a8; font-size: 12px; min-height: 1.4em; margin: 6px 0 0; }
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <button id="feedbackBtn" title="バグ報告・感想を送る">📝 フィードバック</button>
+  <div id="feedbackPanel">
+    <h2>フィードバック / バグ報告</h2>
+    <textarea id="feedbackText" placeholder="気づいたこと、バグ、感想などを書いてください。誉め言葉ぐらいあってもいいんですよ？"></textarea>
+    <div class="menuButtons">
+      <button class="menuBtn" id="feedbackSend">送信</button>
+      <button class="menuBtn secondary" id="feedbackClose">閉じる</button>
+    </div>
+    <p id="feedbackStatus"></p>
+  </div>
+
+  <div class="panel" id="topleft">
+    <div class="label">THROTTLE</div>
+    <div class="big"><span id="thr">0</span>%</div>
+    <div class="label">SPEED</div>
+    <div class="big"><span id="spd">0</span> km/h</div>
+    <div class="label">ALTITUDE</div>
+    <div class="big"><span id="alt">0</span> m</div>
+    <div class="label">G</div>
+    <div class="big"><span id="gforce">0.0</span>G</div>
+    <div class="label">AoA</div>
+    <div class="big"><span id="aoa">0</span>&deg;</div>
+    <div class="label">TURN RATE</div>
+    <div class="big"><span id="turnrate">0</span>&deg;/s</div>
+  </div>
+
+  <div class="panel" id="topright">
+    <button id="enemyStatClose" title="閉じる">&times;</button>
+    <div class="label" id="enemyPanelLabel">ENEMY</div>
+    <div class="label" style="margin-top:6px;">THROTTLE</div>
+    <div class="big"><span id="ethr">0</span>%</div>
+    <div class="label">SPEED</div>
+    <div class="big"><span id="espd">0</span> km/h</div>
+    <div class="label">ALTITUDE</div>
+    <div class="big"><span id="ealt">0</span> m</div>
+    <div class="label">G</div>
+    <div class="big"><span id="egforce">0.0</span>G</div>
+    <div class="label">AoA</div>
+    <div class="big"><span id="eaoa">0</span>&deg;</div>
+    <div class="label">TURN RATE</div>
+    <div class="big"><span id="eturnrate">0</span>&deg;/s</div>
+  </div>
+
+  <div class="panel" id="bottomright">
+    <div class="label">被弾ゲージ (自機)</div>
+    <div class="meterBar"><div id="playerMeterFill" class="meterFill"></div></div>
+    <div class="label" style="margin-top:8px;">照準ゲージ (敵機)</div>
+    <div class="meterBar"><div id="enemyMeterFill" class="meterFill"></div></div>
+  </div>
+
+  <div class="panel" id="bottomleft">
+    <span id="matchupLabel"></span><br>
+    W/S ピッチ ・ A/D ロール ・ Q/E ヨー ・ R/F スロットル ・ Space エアブレーキ ・ Shift 敵機を見る
+  </div>
+
+  <div id="gunsFlash">GUNS!</div>
+  <div id="stallWarn">STALL</div>
+  <div id="flapsWarn">COMBAT FLAPS</div>
+
+  <div id="enemyIndicator">
+    <div id="enemyArrow">&#9650;</div>
+    <div id="enemyDist"></div>
+  </div>
+
+  <div id="adi">
+    <div id="adiHorizon">
+      <div id="adiSky"></div>
+      <div id="adiGround"></div>
+      <div id="adiHorizonLine"></div>
+    </div>
+    <div id="adiBankPointer"></div>
+    <div id="adiAircraftSymbol">
+      <div class="wing wingL"></div>
+      <div class="wing wingR"></div>
+      <div class="dot"></div>
+    </div>
+    <div id="adiLabel">ATTITUDE</div>
+  </div>
+
+  <div id="center-message">
+    <div class="screen active" id="screenMenu">
+      <h1>航空格闘戦</h1>
+      <p>3rd/4th世代 戦闘機による近接格闘戦シミュレーター<br>相手の射線（ガンコーン）に入り続けると撃墜されます。</p>
+      <div class="menuButtons">
+        <button class="menuBtn" id="btnVsAI">AIと対戦（1人プレイ）</button>
+        <button class="menuBtn" id="btnRandomMatch">オンライン: ランダムマッチ</button>
+        <button class="menuBtn" id="btnCreateRoom">オンライン: ルームを作成（フレンド戦）</button>
+        <button class="menuBtn secondary" id="btnJoinRoomShow">オンライン: ルームに参加</button>
+      </div>
+      <div class="serverRow">
+        <label for="serverUrlInput">中継サーバーアドレス（オンライン対戦用）</label>
+        <input type="text" id="serverUrlInput" placeholder="ws://localhost:8080">
+      </div>
+      <p class="menuNote" id="menuNote"></p>
+    </div>
+
+    <div class="screen" id="screenCategorySelect">
+      <h1>カテゴリを選択</h1>
+      <p id="categorySelectNote">対戦に使う機体のカテゴリを選んでください。</p>
+      <div class="menuButtons">
+        <button class="menuBtn" id="btnCategoryJet">ジェット機</button>
+        <button class="menuBtn" id="btnCategoryProp">レシプロ機（第二次大戦期）</button>
+        <button class="menuBtn secondary" id="btnCategoryBack">戻る</button>
+      </div>
+    </div>
+
+    <div class="screen" id="screenJoinRoom">
+      <h1>ルームに参加</h1>
+      <p>フレンドから伝えられたコードを入力してください。</p>
+      <input type="text" id="roomCodeInput" maxlength="4" placeholder="A1B2">
+      <div class="menuButtons">
+        <button class="menuBtn" id="btnJoinRoomGo">参加する</button>
+        <button class="menuBtn secondary" id="btnJoinRoomBack">戻る</button>
+      </div>
+      <p class="menuNote" id="joinRoomNote"></p>
+    </div>
+
+    <div class="screen" id="screenWaiting">
+      <h1>接続中…</h1>
+      <p id="waitingText"></p>
+      <div class="menuButtons">
+        <button class="menuBtn secondary" id="btnWaitCancel">キャンセル</button>
+      </div>
+    </div>
+
+    <div class="screen" id="screenAircraftSelect">
+      <h1 id="selectTitle">機体を選択</h1>
+      <p id="selectNote"></p>
+      <div id="aircraftGrid"></div>
+      <p class="menuNote" id="selectStatus"></p>
+      <div class="menuButtons">
+        <button class="menuBtn secondary" id="btnSelectBack">戻る</button>
+      </div>
+    </div>
+
+    <div class="screen" id="screenGameOver">
+      <h1 id="msgTitle">航空格闘戦</h1>
+      <p id="msgBody"></p>
+      <div class="menuButtons">
+        <button class="menuBtn" id="btnPrimary">もう一度</button>
+        <button class="menuBtn secondary" id="btnToMenu">メニューに戻る</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<script>
+// ================================================================
+// 目次
+//  1. 定数（物理／機体データベース／兵装／AI／カメラ／弾道）
+//  2. DOM要素参照 & 静的HUDセットアップ
+//  3. シーン・カメラ・レンダラー
+//  4. 3D表示物（敵機マーカー／ガンライン）
+//  5. 機体モデル生成・状態オブジェクト生成
+//  6. 飛行物理（stepPhysics）
+//  7. プレイヤー入力
+//  8. 敵AI（computeAIControls）
+//  9. 機体インスタンス管理（player / enemy, resetGame）
+// 10. カメラ制御（updateCamera）
+// 11. HUDインジケーター更新（敵機マーカー／ADI）
+// 12. 弾道シミュレーション・命中判定
+// 13. メインループ・ゲームフロー
+// ================================================================
+
+
+// ================================================================
+// 1. 定数
+// ================================================================
+
+// --- 1-1. 物理共通定数 ---
+const G = 9.81;
+const RHO_SEA_LEVEL = 1.225; // kg/m^3。海面高度での空気密度
+const ATMOSPHERE_SCALE_HEIGHT = 9000; // m。高度による空気密度の減衰を表す指数関数近似のスケール高度
+                                       // （国際標準大気を単純な指数関数1本で近似したもの。高度10,000mで
+                                       //   密度は海面のおよそ33%まで下がる＝同じ速度でも揚力・舵の効きが
+                                       //   大幅に落ち、よほどの高速でない限りまともに機動できなくなる）
+const DEG = Math.PI / 180;
+const MAX_G = 12; // 機体の構造限界（これを超える荷重は出せない）
+
+// 高度に応じた空気密度（簡易大気モデル）。地上0m未満は海面密度でクランプする。
+function airDensityAt(altitude) {
+  return RHO_SEA_LEVEL * Math.exp(-Math.max(altitude, 0) / ATMOSPHERE_SCALE_HEIGHT);
+}
+
+// --- 1-2. 機体データベース（ここを変えるだけで挙動が変わる＝機体追加が容易になる設計） ---
+const AIRCRAFT_DB = {
+  F16: {
+    label: "F-16",
+    category: "jet",
+    color: 0xaab2bd,
+    mass: 9500,          // kg
+    wingArea: 27.9,       // m^2
+    CLalpha: 5.0,          // per rad
+    stallAoA: 24 * DEG,    // 失速迎角
+    extendedRange: 20 * DEG, // 失速後、揚力が0近くまで落ちる角度幅
+    CD0: 0.020,
+    k: 0.100,               // 誘導抗力係数
+    maxThrust: 120000,       // N (アフターバーナー込み)
+    rollRateMax: 300 * DEG,  // rad/s
+    pitchRateMax: 35 * DEG,
+    yawRateMax: 25 * DEG,
+    maxAoA: 24 * DEG,        // AoAリミッター（フライ・バイ・ワイヤ）の基本上限
+    maxG: 9,                // G-リミッターの基本上限
+    fuselageLen: 6.2, wingSpan: 5.0, twinTail: false,
+    // --- 重心(CG)・空力中心(CP)：胴体長に対する機首からの割合(0=機首, 1=尾部)で表す。
+    //     CPがCGより後方（正の静安定余裕）なほど姿勢が安定するが、そのぶん機首の動きは
+    //     鈍くなる。値自体は各機の実機での知られた操縦特性を踏まえた概算（F-16は実機同様、
+    //     余裕を意図的に小さくして緩安定・高機動な特性を表現）。現状index2では未使用の
+    //     データのみで、実際の失速モーメント計算はindex3側で行う。 ---
+    cgFraction: 0.40, cpFraction: 0.42,
+  },
+  SU27: {
+    label: "Su-27",
+    category: "jet",
+    color: 0x5f7a63,
+    mass: 18000,
+    wingArea: 62.0,
+    CLalpha: 4.3,
+    stallAoA: 26 * DEG,
+    extendedRange: 60 * DEG, // コブラ機動を再現：失速後も緩やかに揚力が残る
+    CD0: 0.024,
+    k: 0.114,
+    maxThrust: 240000, // N（AL-31F アフターバーナー×2基相当）
+    rollRateMax: 220 * DEG,
+    pitchRateMax: 42 * DEG,   // 高い機首上げ能力（コブラ機動）
+    yawRateMax: 22 * DEG,
+    maxAoA: 24 * DEG,          // 基本のAoA上限
+    maxAoAExtended: 60 * DEG,  // コブラ機動を許容する拡張上限
+    maxG: 9,                  // 基本のG制限
+    maxGExtended: 12,         // 拡張モード時は実質無制限
+    extendedSpeedThreshold: 800 / 3.6, // m/s（800km/h）。自機の速度がこれ以下の時だけ拡張モード
+    extendedDistThreshold: 1000,        // m。相手との距離がこれ以下の時だけ拡張モード
+    fuselageLen: 7.4, wingSpan: 6.5, twinTail: true,
+    cgFraction: 0.42, cpFraction: 0.46,
+  },
+
+  // --- 追加機体（第3・第4世代機）：質量・翼面積・推力・寸法は公開されている実機スペック
+  //     （空虚重量+標準的な空対空装備を想定した「戦闘重量」クラス）に基づく概算値。
+  //     一方でCLalpha/CD0/k/各舵の応答速度などはこの簡易飛行モデル特有のパラメータで
+  //     実機の資料に対応する値が存在しないため、各機の知られた運動性能の評価
+  //     （旋回性能・ロール率・失速特性など）をもとにゲームバランスとして設定している。 ---
+  F5: {
+    label: "F-5E Tiger II",
+    category: "jet",
+    color: 0xc9b98a,
+    mass: 5100,            // kg（戦闘重量。空虚重量約4,410kgベース）
+    wingArea: 17.3,         // m^2
+    CLalpha: 4.6,
+    stallAoA: 22 * DEG,
+    extendedRange: 16 * DEG,
+    CD0: 0.018,             // 小型・低抵抗な機体
+    k: 0.115,
+    maxThrust: 44000,       // N（J85-GE-21 ×2基 アフターバーナー合計。非力な軽戦闘機）
+    rollRateMax: 320 * DEG, // 優れたロール率で知られる
+    pitchRateMax: 34 * DEG,
+    yawRateMax: 26 * DEG,
+    maxAoA: 22 * DEG,
+    maxG: 7.3,              // 実機の構造制限 7.33G
+    fuselageLen: 5.9, wingSpan: 3.8, twinTail: false,
+    cgFraction: 0.39, cpFraction: 0.42,
+  },
+  F4: {
+    label: "F-4E Phantom II",
+    category: "jet",
+    color: 0x4a5a6a,
+    mass: 16000,            // kg（戦闘重量。空虚重量約13,760kgベース）
+    wingArea: 49.2,         // m^2
+    CLalpha: 3.8,
+    stallAoA: 18 * DEG,     // 高AoAでの departure（急激な失速/スピン）で知られる
+    extendedRange: 10 * DEG,
+    CD0: 0.028,             // 大型・高抵抗
+    k: 0.120,
+    maxThrust: 150000,      // N（J79-GE-17 ×2基 アフターバーナー合計。強力だが重い）
+    rollRateMax: 180 * DEG,
+    pitchRateMax: 26 * DEG,
+    yawRateMax: 20 * DEG,
+    maxAoA: 18 * DEG,
+    maxG: 7.5,
+    fuselageLen: 7.9, wingSpan: 5.5, twinTail: false,
+    cgFraction: 0.44, cpFraction: 0.49, // 大型・長胴で安定余裕が大きめ＝機首の動きは鈍い
+  },
+  MIG21: {
+    label: "MiG-21bis",
+    category: "jet",
+    color: 0x8a9aa8,
+    mass: 7100,             // kg（戦闘重量。空虚重量約5,350kgベース）
+    wingArea: 23.0,         // m^2（デルタ翼）
+    CLalpha: 3.6,           // デルタ翼は揚力傾斜が緩やか
+    stallAoA: 26 * DEG,     // デルタ翼特有の穏やかな失速特性
+    extendedRange: 14 * DEG,
+    CD0: 0.026,             // デルタ翼は誘導抗力が大きい
+    k: 0.135,
+    maxThrust: 97000,       // N（R-25 アフターバーナー。小型機体に強力な単発エンジン）
+    rollRateMax: 240 * DEG,
+    pitchRateMax: 30 * DEG,
+    yawRateMax: 20 * DEG,
+    maxAoA: 26 * DEG,
+    maxG: 8.5,
+    fuselageLen: 6.5, wingSpan: 3.4, twinTail: false,
+    cgFraction: 0.40, cpFraction: 0.44,
+  },
+  MIG29: {
+    label: "MiG-29",
+    category: "jet",
+    color: 0x3d4f5c,
+    mass: 15300,            // kg（戦闘重量。空虚重量約11,000kgベース）
+    wingArea: 38.0,         // m^2
+    CLalpha: 4.2,
+    stallAoA: 27 * DEG,
+    extendedRange: 35 * DEG, // Su-27ほど極端ではないが、ある程度の高AoA機動が可能
+    CD0: 0.023,
+    k: 0.108,
+    maxThrust: 163000,      // N（RD-33 ×2基 アフターバーナー合計）
+    rollRateMax: 240 * DEG,
+    pitchRateMax: 40 * DEG,
+    yawRateMax: 24 * DEG,
+    maxAoA: 27 * DEG,
+    maxAoAExtended: 45 * DEG,
+    maxG: 9,
+    maxGExtended: 999,
+    extendedSpeedThreshold: 800 / 3.6,
+    extendedDistThreshold: 1000,
+    fuselageLen: 7.1, wingSpan: 5.3, twinTail: true,
+    cgFraction: 0.41, cpFraction: 0.44,
+  },
+  F14: {
+    label: "F-14 Tomcat",
+    category: "jet",
+    color: 0x6b7280,
+    mass: 26000,            // kg（戦闘重量。空虚重量約19,840kgベース）
+    wingArea: 52.5,         // m^2（可変後退翼。戦闘形態での代表値）
+    CLalpha: 4.3,           // 可変後退翼により低速域でも比較的高い揚力が出る
+    stallAoA: 20 * DEG,     // 高AoAでの departure に注意が必要な機体として知られる
+    extendedRange: 12 * DEG,
+    CD0: 0.026,
+    k: 0.105,
+    maxThrust: 220000,      // N（F110-GE-400 ×2基 アフターバーナー合計）
+    rollRateMax: 160 * DEG, // 大型・重量機のため roll は控えめ
+    pitchRateMax: 30 * DEG,
+    yawRateMax: 18 * DEG,
+    maxAoA: 20 * DEG,
+    maxG: 6.5,              // 実機で知られる厳しめのG制限
+    fuselageLen: 7.8, wingSpan: 5.4, twinTail: true,
+    cgFraction: 0.43, cpFraction: 0.48, // 大型・重量機で安定余裕も大きめ
+  },
+  F15: {
+    label: "F-15 Eagle",
+    category: "jet",
+    color: 0xbfc4c9,
+    mass: 15700,            // kg（戦闘重量。空虚重量約12,700kgベース）
+    wingArea: 56.5,         // m^2（大面積の主翼）
+    CLalpha: 4.7,
+    stallAoA: 26 * DEG,
+    extendedRange: 18 * DEG,
+    CD0: 0.019,
+    k: 0.095,               // 効率の良い主翼で持続旋回性能に優れる
+    maxThrust: 210000,      // N（F100-PW-229 ×2基 アフターバーナー合計。高い推力重量比）
+    rollRateMax: 280 * DEG,
+    pitchRateMax: 38 * DEG,
+    yawRateMax: 24 * DEG,
+    maxAoA: 26 * DEG,
+    maxG: 9,
+    fuselageLen: 8.0, wingSpan: 6.1, twinTail: true,
+    cgFraction: 0.41, cpFraction: 0.44,
+  },
+  FA18: {
+    label: "F/A-18C Hornet",
+    category: "jet",
+    color: 0x9ba7ab,
+    mass: 13000,            // kg（戦闘重量。空虚重量約10,430kgベース）
+    wingArea: 37.16,        // m^2
+    CLalpha: 4.5,           // LEX（前縁付け根延長）による渦揚力で高AoA域まで揚力を保つ
+    stallAoA: 28 * DEG,
+    extendedRange: 42 * DEG, // 拡張AoA上限(50°)までの超過分(22°)に対して十分な幅を持たせ、
+                              // 揚力係数が底（falloffの下限0.12）まで落ち切らないようにしている。
+                              // ここが狭すぎると、せっかくAoAリミッターを解放しても
+                              // ほとんど揚力の出ない領域まで機首を上げるだけになり、
+                              // 「リミッター解除中の旋回率が貧弱」になってしまっていた。
+    CD0: 0.021,
+    k: 0.100,
+    maxThrust: 157000,      // N（F404-GE-402 ×2基 アフターバーナー合計）
+    rollRateMax: 260 * DEG,
+    pitchRateMax: 36 * DEG,
+    yawRateMax: 24 * DEG,
+    maxAoA: 26 * DEG,          // 基本のAoA上限
+    maxAoAExtended: 50 * DEG,  // LEXによる高AoAでの卓越した操縦性（NASA HARV実験機としても
+                               // 使われたほどの高AoA制御能力）を、Su-27/MiG-29と同様の
+                               // 拡張モードとして再現
+    maxG: 7.5,                 // 実機の構造制限
+    maxGExtended: 999,
+    extendedSpeedThreshold: 800 / 3.6,
+    extendedDistThreshold: 1000,
+    fuselageLen: 7.0, wingSpan: 5.4, twinTail: true,
+    cgFraction: 0.40, cpFraction: 0.43, // LEXによる高AoA機動を踏まえ余裕は小さめ
+  },
+
+  // --- レシプロ機（第二次大戦期）：ジェット機とは推力の出方が根本的に異なるため
+  //     （エンジン出力(馬力)が一定で、推力=出力/速度というプロペラ特有の関係を持つ。
+  //     stepPhysics側のpropThrustMagnitude()で処理される）、category: "prop" として
+  //     区別し、ジェット機とは対戦させない前提でメニュー側もカテゴリ分けしている。
+  //     質量・翼面積・出力は公開実機スペックに基づく概算値、CLalpha等は各機の
+  //     知られた運動性能評価に基づくゲームバランス値（ジェット機と同様の方針）。 ---
+  P51: {
+    label: "P-51D Mustang",
+    category: "prop",
+    color: 0x7a8a99,
+    mass: 4175,             // kg（戦闘重量。空虚重量約3,465kgベース）
+    wingArea: 21.83,        // m^2
+    CLalpha: 4.8,           // 高効率な層流翼
+    stallAoA: 16 * DEG,
+    extendedRange: 8 * DEG,
+    CD0: 0.021,
+    k: 0.085,
+    enginePower: 1120000,   // W（Packard V-1650-7 約1,500hp相当）
+    propEfficiency: 0.85,
+    maxThrust: 11000,       // N（低速域での静止推力の目安上限）
+    // --- コンバットフラップ：低速・近距離の格闘戦（computeExtendedActiveの判定）でのみ
+    //     自動展開する想定。CLmaxを引き上げてコーナー速度を実戦的な帯（約370km/h）まで
+    //     下げる代わりに、抗力を増やして急激に速度を失う（＝長時間は維持できない）。
+    flapCLAlphaBonus: 2.16, // per rad
+    flapStallAoABonus: 3 * DEG,
+    flapDragBonus: 0.03,
+    extendedSpeedThreshold: 460 / 3.6, // m/s。これ以下でフラップ展開
+    extendedDistThreshold: 1000,        // m。相手がこれより近い時だけ展開
+    rollRateMax: 100 * DEG,
+    pitchRateMax: 20 * DEG,
+    yawRateMax: 15 * DEG,
+    maxAoA: 16 * DEG,
+    maxG: 8,
+    fuselageLen: 4.0, wingSpan: 5.3, twinTail: false,
+    cgFraction: 0.36, cpFraction: 0.40, // 液冷インライン機で機首側に重い
+  },
+  SPITFIRE: {
+    label: "Spitfire Mk.IX",
+    category: "prop",
+    color: 0x5a6b52,
+    mass: 3400,             // kg（戦闘重量。空虚重量約2,300kgベース）
+    wingArea: 22.48,        // m^2（楕円翼）
+    CLalpha: 5.2,           // 楕円翼による理想に近い揚力特性
+    stallAoA: 18 * DEG,     // 穏やかで扱いやすい失速特性で知られる
+    extendedRange: 8 * DEG,
+    CD0: 0.020,
+    k: 0.060,               // 楕円翼は誘導抗力が最も少ない
+    enginePower: 1030000,   // W（Merlin 61 約1,380hp相当）
+    propEfficiency: 0.85,
+    maxThrust: 10000,
+    // --- コンバットフラップ：楕円翼の高いベース性能に加え、フラップでCLmaxをさらに
+    //     引き上げ、コーナー速度を約300km/hまで下げる（P-51以上に低速旋回に強くなる）---
+    flapCLAlphaBonus: 2.34, // per rad
+    flapStallAoABonus: 3 * DEG,
+    flapDragBonus: 0.03,
+    extendedSpeedThreshold: 400 / 3.6,
+    extendedDistThreshold: 1000,
+    rollRateMax: 85 * DEG,  // 高速域でのロール率は当時としても遅めで知られる（弱点）
+    pitchRateMax: 24 * DEG, // 優れた昇降舵の効きによるタイトな旋回
+    yawRateMax: 15 * DEG,
+    maxAoA: 18 * DEG,
+    maxG: 8,
+    fuselageLen: 3.7, wingSpan: 5.3, twinTail: false,
+    cgFraction: 0.35, cpFraction: 0.38, // 軽い機体・敏感な昇降舵に対応し余裕は小さめ
+  },
+  FW190: {
+    label: "Fw 190 A-8",
+    category: "prop",
+    color: 0x4d4137,
+    mass: 4400,             // kg（戦闘重量。空虚重量約3,200kgベース）
+    wingArea: 18.30,        // m^2
+    CLalpha: 4.3,
+    stallAoA: 14 * DEG,     // 高翼面荷重による鋭い失速特性
+    extendedRange: 6 * DEG,
+    CD0: 0.023,
+    k: 0.095,
+    enginePower: 1250000,   // W（BMW 801D-2 約1,677hp相当）
+    propEfficiency: 0.83,
+    maxThrust: 12000,
+    // --- コンバットフラップ：翼面荷重が高く旋回性能が低いため、フラップを展開しても
+    //     コーナー速度は約470km/hと4機の中で最も高いまま（＝苦手な低速旋回戦を避け、
+    //     得意な高速一撃離脱を選ぶべき機体、という史実の傾向をそのまま再現）---
+    flapCLAlphaBonus: 2.15, // per rad
+    flapStallAoABonus: 3 * DEG,
+    flapDragBonus: 0.035,
+    extendedSpeedThreshold: 420 / 3.6,
+    extendedDistThreshold: 1000,
+    rollRateMax: 160 * DEG, // 当時のレシプロ機で随一の高速ロール率
+    pitchRateMax: 18 * DEG,
+    yawRateMax: 14 * DEG,
+    maxAoA: 14 * DEG,
+    maxG: 8.5,              // 頑丈な機体構造
+    fuselageLen: 3.7, wingSpan: 4.9, twinTail: false,
+    cgFraction: 0.33, cpFraction: 0.38, // 大型空冷星形エンジンで機首が重く、安定余裕は大きめ
+  },
+  ZERO: {
+    label: "A6M5 零戦",
+    category: "prop",
+    color: 0x6b7355,
+    mass: 2400,             // kg（戦闘重量。空虚重量約1,876kgベース）
+    wingArea: 21.3,         // m^2
+    CLalpha: 4.6,
+    stallAoA: 20 * DEG,     // 極めて低い翼面荷重による寛大な失速特性
+    extendedRange: 10 * DEG,
+    CD0: 0.022,
+    k: 0.075,
+    enginePower: 830000,    // W（栄21型 約1,130hp相当。同世代の他国機より非力）
+    propEfficiency: 0.82,
+    maxThrust: 7500,
+    // --- コンバットフラップ（「空戦フラップ」）：元々の翼面荷重の低さに加え、
+    //     フラップでコーナー速度が約250km/hまで下がる＝4機中最も鋭く低速旋回できる ---
+    flapCLAlphaBonus: 0.92, // per rad（他機より控えめ。元々のCLmaxが高く伸びしろが小さいため）
+    flapStallAoABonus: 3 * DEG,
+    flapDragBonus: 0.025,
+    extendedSpeedThreshold: 350 / 3.6,
+    extendedDistThreshold: 1000,
+    rollRateMax: 70 * DEG,  // 高速域でのロール率の悪化は知られた弱点
+    pitchRateMax: 26 * DEG, // 低〜中速域での卓越した旋回性能
+    yawRateMax: 16 * DEG,
+    maxAoA: 20 * DEG,
+    maxG: 6,                // 防弾装備を持たない軽量構造ゆえの低いG制限
+    fuselageLen: 3.7, wingSpan: 5.1, twinTail: false,
+    cgFraction: 0.38, cpFraction: 0.40, // 極めて軽量・敏感な機体で余裕は4機中最小
+  },
+};
+
+// 機体選択画面に表示する順序（カテゴリ別）
+const AIRCRAFT_ORDER_JET = ["F16", "F15", "FA18", "F14", "MIG29", "MIG21", "F5", "F4", "SU27"];
+const AIRCRAFT_ORDER_PROP = ["P51", "SPITFIRE", "FW190", "ZERO"];
+function orderForCategory(category) {
+  return category === "prop" ? AIRCRAFT_ORDER_PROP : AIRCRAFT_ORDER_JET;
+}
+
+// --- 1-3. 兵装（ガン）定数 ---
+const GUN_CONE = 3 * DEG;    // 射線と判定する半角
+const GUN_RANGE = 800;       // m
+const GUN_MIN_RANGE = 0;
+
+// --- 1-4. 弾道シミュレーション定数（M61バルカン相当の特性） ---
+const BULLET_MUZZLE_V = 1030;   // m/s（M61バルカンの初速に近い値）
+const BULLET_DRAG_K = 0.00062;  // 抗力係数（1000m前方で初速の7割程度まで減速する程度に調整）
+const BULLET_HIT_RADIUS = 10;   // m。弾道がこの距離まで相手に近づけば命中とみなす
+const BULLET_SIM_DT = 0.015;
+const BULLET_SIM_MAXTIME = 2.2;
+
+// --- 1-5. 敵AI定数：優先度1＝失速回避、優先度2＝高度セーフティ、優先度2.5＝被弾回避、
+//     優先度3＝追尾（常にリードパーシュート。スロットルだけが唯一の駆け引き要素） ---
+const AI_STALL_ENTER_MARGIN = 4 * DEG; // 失速角にこれだけ近づいたら回避行動に入る
+const AI_STALL_EXIT_MARGIN = 9 * DEG;  // 失速角からこれだけ離れたら追尾に復帰する（バタつき防止）
+const AI_ALT_FLOOR = 200;        // m。これを下回ったら高度回復を最優先にする
+const AI_ALT_SAFE = 400;        // m。ここまで回復すれば通常運用に戻る
+const AI_ALT_DESCENT_WARN = -50; // m/s。低空でこれより速く沈下していたら早めに警戒する
+const AI_CLOSE_RANGE = 1200;      // m。これより近ければ「格闘戦の間合い」＝相手のペースに合わせる対象
+const AI_HARD_TURN_ANGLE = 20 * DEG; // これ以上の舵角を要求する時は「きつく旋回したい」状況とみなす
+const AI_OVERSPEED_RATIO = 1.15;  // 相手より速度がこの倍率を超えたら「速すぎ」とみなす目安
+                                   // （プレイヤーが意図的に減速してきつい旋回戦を仕掛けてきた時、
+                                   //   AIもこれを検知して速度を合わせにいく＝唯一のスロットル判断）
+
+const AI_THREAT_CONE_DEG = 12;    // deg。相手の機首がこの角度以内に自機を捉えていたら被弾の危険ありとみなす
+const AI_THREAT_EXIT_MARGIN_DEG = 8; // deg。回避行動から復帰するためのヒステリシス余裕
+const AI_BREAK_GAIN_MULT = 1.6;   // 被弾回避（ブレイクターン）時、旋回半径を重視して操舵ゲインを引き上げる倍率
+
+// --- 1-6. カメラ定数 ---
+const BASE_FOV = 80;
+const REF_SPEED = 230; // 基準となる巡航速度(m/s)。これより遅いとカメラが寄る＝失速が体感できる
+const SHIFT_CAM_DIST = 26; // Shiftモードでのカメラ距離（機体モデルを確実にクリアする距離）
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const FALLBACK_UP = new THREE.Vector3(0, 0, 1);
+
+// --- 1-7. 描画定数（機体表示スケール／ガンライン描画） ---
+const VISUAL_SCALE = 2.0; // 見やすさのための表示上の拡大（当たり判定など物理には影響しない）
+const GUN_LINE_SEGMENTS = 40;
+const GUN_LINE_RADIUS = 0.6;
+const GUN_LINE_AXIS = new THREE.Vector3(0, 1, 0);
+const ADI_PX_PER_DEG = 3.0;
+
+// --- 1-8. 推力パワーカーブ定数：常に最大推力が出るのは不自然なため、対気速度に応じて
+//     エンジン出力に倍率をかける（低速域0.8× → 中速域800km/h前後で1.0× → 高速域1,000km/h以降で1.2×） ---
+const THRUST_PWR_LOW = 0.8;                 // 低速域（0 km/h）でのパワー係数
+const THRUST_PWR_MID = 0.9;                 // 中速域（800 km/h前後）でのパワー係数
+const THRUST_PWR_HIGH = 1.0;                // 高速域（1,000 km/h以降）でのパワー係数
+const THRUST_PWR_MID_SPEED = 800 / 3.6;     // m/s（800 km/h）
+const THRUST_PWR_HIGH_SPEED = 1000 / 3.6;   // m/s（1,000 km/h）
+
+
+// ================================================================
+// 2. DOM要素参照 & 静的HUDセットアップ
+// ================================================================
+const spdEl = document.getElementById("spd");
+const altEl = document.getElementById("alt");
+const thrEl = document.getElementById("thr");
+const gEl = document.getElementById("gforce");
+const aoaEl = document.getElementById("aoa");
+const turnRateEl = document.getElementById("turnrate");
+const topRightEl = document.getElementById("topright");
+const espdEl = document.getElementById("espd");
+const ealtEl = document.getElementById("ealt");
+const ethrEl = document.getElementById("ethr");
+const egEl = document.getElementById("egforce");
+const eaoaEl = document.getElementById("eaoa");
+const eturnRateEl = document.getElementById("eturnrate");
+
+const stallWarnEl = document.getElementById("stallWarn");
+const flapsWarnEl = document.getElementById("flapsWarn");
+const playerMeterFill = document.getElementById("playerMeterFill");
+const enemyMeterFill = document.getElementById("enemyMeterFill");
+const gunsFlashEl = document.getElementById("gunsFlash");
+const centerMsg = document.getElementById("center-message");
+const msgTitle = document.getElementById("msgTitle");
+const msgBody = document.getElementById("msgBody");
+
+const enemyArrowEl = document.getElementById("enemyArrow");
+const enemyDistEl = document.getElementById("enemyDist");
+const enemyIndicatorEl = document.getElementById("enemyIndicator");
+
+const adiHorizonEl = document.getElementById("adiHorizon");
+const adiBankPointerEl = document.getElementById("adiBankPointer");
+
+const enemyPanelLabelEl = document.getElementById("enemyPanelLabel");
+const matchupLabelEl = document.getElementById("matchupLabel");
+
+document.getElementById("enemyStatClose").addEventListener("click", () => {
+  topRightEl.style.display = "none";
+});
+// Iキーで敵機ステータス表示のオン/オフを切り替え（消してしまっても復活できるように）
+window.addEventListener("keydown", (e) => {
+  if (e.key.toLowerCase() === "i") {
+    topRightEl.style.display = topRightEl.style.display === "none" ? "block" : "none";
+  }
+});
+
+// ピッチ目盛り線をあらかじめ生成しておく（±10/20/30度）
+[-30, -20, -10, 10, 20, 30].forEach((deg) => {
+  const tick = document.createElement("div");
+  tick.className = "adiTick";
+  const w = Math.abs(deg) === 20 ? 34 : 60;
+  tick.style.width = w + "px";
+  tick.style.marginLeft = -(w / 2) + "px";
+  tick.style.top = (210 - deg * ADI_PX_PER_DEG) + "px";
+  adiHorizonEl.appendChild(tick);
+});
+
+
+// ================================================================
+// 3. シーン・カメラ・レンダラー
+// ================================================================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x8fc6ff);
+scene.fog = new THREE.Fog(0x8fc6ff, 500, 6000);
+
+const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.5, 20000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+sun.position.set(300, 500, 100);
+scene.add(sun);
+
+// 地面（グリッドで高度・移動が分かるようにする）
+const groundGeo = new THREE.PlaneGeometry(20000, 20000);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x2f6b3a });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
+const grid = new THREE.GridHelper(20000, 200, 0x1c4a26, 0x1c4a26);
+scene.add(grid);
+
+// 雲代わりの目印（動きが分かりやすいように点在させる）
+const cloudGeo = new THREE.SphereGeometry(1, 6, 6);
+const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 });
+for (let i = 0; i < 360; i++) {
+  const puff = new THREE.Mesh(cloudGeo, cloudMat);
+  const s = 20 + Math.random() * 60;
+  puff.scale.set(s, s * 0.6, s);
+  puff.position.set(
+    (Math.random() - 0.5) * 8000,
+    Math.random() * 6000,
+    (Math.random() - 0.5) * 8000
+  );
+  scene.add(puff);
+}
+
+
+// ================================================================
+// 4. 3D表示物（敵機マーカー／ガンライン）
+// ================================================================
+
+// --- 4-1. 敵機ハイライト用マーカー（霧・距離の影響を受けず常に見える発光サイン） ---
+function makeMarkerTexture(color) {
+  // 機体を模した簡易シルエット（主翼＋尾翼）。material.rotationで回転させることで
+  // 敵機のバンク角（傾き）を視覚的に伝えるためのアイコン。既定姿勢＝主翼水平・機首上向き。
+  const size = 64;
+  const cnv = document.createElement("canvas");
+  cnv.width = cnv.height = size;
+  const c = cnv.getContext("2d");
+  c.translate(size / 2, size / 2);
+  c.fillStyle = color;
+  c.strokeStyle = "#ffffff";
+  c.lineWidth = 2;
+  c.fillRect(-24, -3, 48, 6);   // 主翼
+  c.strokeRect(-24, -3, 48, 6);
+  c.fillRect(-3, -20, 6, 26);   // 胴体
+  c.strokeRect(-3, -20, 6, 26);
+  c.fillRect(-10, 15, 20, 5);   // 水平尾翼
+  c.strokeRect(-10, 15, 20, 5);
+  c.beginPath();
+  c.arc(0, -20, 4, 0, Math.PI * 2); // 機首
+  c.fillStyle = "#ffffff";
+  c.fill();
+  return new THREE.CanvasTexture(cnv);
+}
+const enemyMarkerSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+  map: makeMarkerTexture("#ff3b3b"), depthTest: false, depthWrite: false, transparent: true, fog: false,
+}));
+enemyMarkerSprite.renderOrder = 999;
+scene.add(enemyMarkerSprite);
+
+// --- 4-2. 射線表示：M61バルカン相当の弾道（初速・重力落下・空気抵抗による減速）を
+//     シミュレートした実際の弾道カーブを3D空間に描画する。
+//     細い線(Line)はWebGLだとほぼ1pxでしか描かれず見えづらいため、
+//     実際に太さを持つ円柱セグメントを鎖状につないで曲線を表現する。 ---
+const gunLineMat = new THREE.MeshBasicMaterial({
+  color: 0x33ff66, transparent: true, opacity: 0.45, depthWrite: false, fog: false,
+});
+const gunLineUnitGeo = new THREE.CylinderGeometry(GUN_LINE_RADIUS, GUN_LINE_RADIUS, 1, 5, 1, true);
+const gunLineSegments = [];
+for (let i = 0; i < GUN_LINE_SEGMENTS; i++) {
+  const seg = new THREE.Mesh(gunLineUnitGeo, gunLineMat);
+  seg.visible = false;
+  scene.add(seg);
+  gunLineSegments.push(seg);
+}
+
+function updateGunLine(hasSolution, points) {
+  const availablePts = Math.min(points.length, GUN_LINE_SEGMENTS + 1);
+  const segCount = Math.max(0, availablePts - 1);
+
+  for (let i = 0; i < GUN_LINE_SEGMENTS; i++) {
+    if (i >= segCount) {
+      gunLineSegments[i].visible = false;
+      continue;
+    }
+    const p0 = points[i];
+    const p1 = points[i + 1];
+    const dir = p1.clone().sub(p0);
+    const len = dir.length();
+    if (len < 1e-4) {
+      gunLineSegments[i].visible = false;
+      continue;
+    }
+    const seg = gunLineSegments[i];
+    seg.visible = true;
+    seg.position.copy(p0).addScaledVector(dir, 0.5);
+    seg.quaternion.setFromUnitVectors(GUN_LINE_AXIS, dir.clone().normalize());
+    seg.scale.set(1, len, 1);
+  }
+
+  gunLineMat.color.set(hasSolution ? 0x39ff6a : 0x2ecc71);
+  gunLineMat.opacity = hasSolution ? 0.85 : 0.45;
+}
+
+
+// ================================================================
+// 5. 機体モデル生成・状態オブジェクト生成
+// ================================================================
+
+// --- 5-1. 低ポリ機体モデルを作る ---
+function buildAircraftMesh(params) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: params.color, metalness: 0.3, roughness: 0.6 });
+
+  const noseLen = params.fuselageLen * 0.28;
+  const bodyLen = params.fuselageLen * 0.72;
+
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.55, noseLen, 8), mat);
+  nose.rotation.x = -Math.PI / 2;
+  nose.position.z = -(bodyLen / 2 + noseLen / 2);
+  group.add(nose);
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.0, bodyLen), mat);
+  group.add(body);
+
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(params.wingSpan, 0.12, params.fuselageLen * 0.34), mat);
+  wing.position.z = params.fuselageLen * 0.05;
+  group.add(wing);
+
+  const tailWing = new THREE.Mesh(new THREE.BoxGeometry(params.wingSpan * 0.55, 0.1, params.fuselageLen * 0.16), mat);
+  tailWing.position.z = bodyLen / 2 - params.fuselageLen * 0.05;
+  group.add(tailWing);
+
+  function addFin(offsetX) {
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.1, params.fuselageLen * 0.2), mat);
+    fin.position.set(offsetX, 0.7, bodyLen / 2 - params.fuselageLen * 0.05);
+    group.add(fin);
+  }
+  if (params.twinTail) {
+    addFin(-0.55);
+    addFin(0.55);
+  } else {
+    addFin(0);
+  }
+
+  group.scale.setScalar(VISUAL_SCALE);
+  return group;
+}
+
+// --- 5-2. 機体の状態を作る（物理シミュレーションの本体データ） ---
+function createState(typeKey, position, headingDeg, isPlayer) {
+  const params = AIRCRAFT_DB[typeKey];
+  const mesh = buildAircraftMesh(params);
+  scene.add(mesh);
+
+  const quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), headingDeg * DEG);
+  const forward0 = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
+
+  // 初期速度：ジェット機は230 m/s（≈828km/h）、レシプロ機は最高速度域に近い500km/hでスポーンする
+  const spawnSpeed = params.category === "prop" ? 500 / 3.6 : 230;
+
+  return {
+    isPlayer,
+    params,
+    mesh,
+    position: position.clone(),
+    quat,
+    velocity: forward0.multiplyScalar(spawnSpeed),
+    angVel: { p: 0, q: 0, r: 0 }, // ロール・ピッチ・ヨー角速度(body)
+    throttle: 1.0,
+    airbrake: false,
+    alive: true,
+    underFireMeter: 0,
+    stallRecovering: false,
+    altRecovering: false,
+    evading: false,          // 敵AI専用：被弾回避（優先度2.5）が発動中かどうか
+    hud: { alpha: 0, speed: 0, forwardSpeed: 0, gforce: 0, turnRate: 0 },
+  };
+}
+
+
+// ================================================================
+// 6. 飛行物理の1ステップ（stepPhysics）
+// ================================================================
+
+// --- 推力パワーカーブ：対気速度Vに応じてエンジン出力に倍率をかける
+//     （低速域0.8× → 800km/h前後で1.0× → 1,000km/h以降で1.2×、その先は頭打ち） ---
+function thrustPowerFactor(V) {
+  if (V <= THRUST_PWR_MID_SPEED) {
+    const t = THREE.MathUtils.clamp(V / THRUST_PWR_MID_SPEED, 0, 1);
+    return THREE.MathUtils.lerp(THRUST_PWR_LOW, THRUST_PWR_MID, t);
+  }
+  const t = THREE.MathUtils.clamp((V - THRUST_PWR_MID_SPEED) / (THRUST_PWR_HIGH_SPEED - THRUST_PWR_MID_SPEED), 0, 1);
+  return THREE.MathUtils.lerp(THRUST_PWR_MID, THRUST_PWR_HIGH, t);
+}
+
+// --- レシプロ機の推力：ジェットと違い「エンジン出力(W)がほぼ一定」なプロペラ機は
+//     出力=推力×速度の関係に縛られるため、速度が上がるほど得られる推力は下がっていく
+//     （ジェットのラム効果とは逆の特性）。低速域は推力が発散しないよう、
+//     静止推力(maxThrust)を上限としてクランプする。
+const PROP_MIN_EFFECTIVE_SPEED = 20; // m/s。これ未満は静止推力とみなし、発散を防ぐ
+function propThrustMagnitude(p, V) {
+  const powerThrust = (p.propEfficiency * p.enginePower) / Math.max(V, PROP_MIN_EFFECTIVE_SPEED);
+  return Math.min(p.maxThrust, powerThrust);
+}
+
+// 機体のカテゴリ（ジェット/レシプロ）に応じて推力の出方を切り替える共通窓口
+function thrustMagnitude(p, V, throttle) {
+  if (p.category === "prop") return throttle * propThrustMagnitude(p, V);
+  return throttle * p.maxThrust * thrustPowerFactor(V);
+}
+
+// 拡張モード（ジェット機：Su-27のコブラ機動やMiG-29の準拡張機動／レシプロ機：コンバット
+// フラップ）の発動条件を判定する共通ヘルパー。stepPhysics（実際にリミッターを解放・
+// フラップを展開する側）とcomputeAIControls（AIが同じ条件を先読みして戦術を切り替える側）
+// の両方で全く同じ判定が必要なため、ここに一本化している（二重実装すると、片方だけ条件を
+// 変えてしまいズレる恐れがあるため）。
+function computeExtendedActive(p, speed, dist) {
+  if (!(p.maxGExtended || p.maxAoAExtended || p.flapCLAlphaBonus)) return false;
+  return speed <= (p.extendedSpeedThreshold || 0) && dist <= (p.extendedDistThreshold || 0);
+}
+
+// 拡張モード中に実際に使うAoA上限を返す共通ヘルパー（ジェットのコブラ機動上限／
+// レシプロ機のフラップ展開時の失速角拡大、いずれも同じ考え方なのでここに一本化）。
+// stepPhysics側のAoAリミッターとAI側の失速回避基準（computeAIControls）の両方で使う。
+function effectiveMaxAoA(p, extendedActive) {
+  if (extendedActive && p.maxAoAExtended) return p.maxAoAExtended;
+  if (extendedActive && p.flapStallAoABonus) return p.maxAoA + p.flapStallAoABonus;
+  return p.maxAoA;
+}
+
+// --- 失速時の非対称モーメント計算に使う質点・着力点をcgFraction/cpFractionから
+//     導出する。重心を前後2質点（＋そこから求まるピッチ慣性モーメント）、
+//     揚力の着力点を左右主翼＋尾翼の3点として組み立てる。13機分を手作業で
+//     指定するのは非現実的なため、既存の2つの値（cgFraction/cpFraction）を中心に
+//     機械的に組み立てる方式にしている。結果はp._momentにキャッシュする
+//     （AIRCRAFT_DBのエントリは全対戦で使い回されるため、毎回計算し直す必要はない）。 ---
+function deriveMomentPoints(p) {
+  const CG_SPREAD = 0.09;           // 前後質点をcgFractionからどれだけ離すか
+  const CG_FRONT_MASS_RATIO = 0.52; // 前方質点をわずかに重めにする一般的な近似
+  const TAIL_CP_OFFSET = 0.35;      // 尾翼CPを主翼CP(cpFraction)からどれだけ後方にするか
+  const ROLL_INERTIA_SPAN_FACTOR = 0.6; // ロール慣性モーメント概算に使う「半翼長に対する回転半径」の割合
+
+  const cgFrontFrac = p.cgFraction - CG_SPREAD;
+  const cgRearFrac = p.cgFraction + CG_SPREAD * 1.2;
+  const cgX = cgFrontFrac * CG_FRONT_MASS_RATIO + cgRearFrac * (1 - CG_FRONT_MASS_RATIO);
+
+  const mFront = p.mass * CG_FRONT_MASS_RATIO;
+  const mRear = p.mass * (1 - CG_FRONT_MASS_RATIO);
+  const pitchInertia = mFront * Math.pow((cgFrontFrac - cgX) * p.fuselageLen, 2)
+                      + mRear * Math.pow((cgRearFrac - cgX) * p.fuselageLen, 2);
+
+  const wingCPFrac = p.cpFraction;
+  const tailCPFrac = Math.min(0.95, p.cpFraction + TAIL_CP_OFFSET);
+  const wingSemiSpan = p.wingSpan / 2;
+  const rollInertia = p.mass * 0.5 * Math.pow(wingSemiSpan * ROLL_INERTIA_SPAN_FACTOR, 2); // 主翼質量を全備重量の半分とみなす簡易近似
+
+  return { cgX, pitchInertia, wingCPFrac, tailCPFrac, wingSemiSpan, rollInertia };
+}
+
+// === パラメトリック飛行モデル導出（6DOF移行版）===
+// 既存のAIRCRAFT_DBパラメータ（質量・寸法・各軸の最大レート）から、モーメントベースの
+// 回転運動に必要な「慣性モーメント」と「各軸の制御／減衰／横方向モーメント係数」を
+// 機械的に導出する。13機ぶんを手で与える代わりに、幾何形状と既知の運動性能から組み立てる
+// （＝index2の機体資産をそのまま活かしつつ、本物の力学に載せ替える）。結果はp._fmにキャッシュ。
+//   校正方針：制御と減衰を Cctrl = Cdamp·rateMax の関係で結ぶと、定常最大レートは
+//   従来のrollRateMax等に一致する（＝操作感・機体バランスを保つ）。そのうえで、
+//   横滑りβから生じる weathercock（機首を相対風へ）・dihedral（βと逆へロール）などの
+//   空力モーメントを加えることで、横滑り・ダッチロール・旋回協調が計算結果として創発する。
+function deriveFlightModel(p) {
+  const S = p.wingArea, b = p.wingSpan, L = p.fuselageLen;
+  const m = p.mass;
+
+  // 慣性モーメント[kg·m^2]（概算）：ロールは翼幅、ピッチ/ヨーは胴体長が支配
+  const Ixx = m * Math.pow(b * 0.30, 2);   // ロール軸
+  const Iyy = m * Math.pow(L * 0.38, 2);   // ピッチ軸
+  const Izz = Ixx + Iyy;                   // ヨー軸（平板近似）
+
+  // 各軸の減衰係数：目標時定数τで一次遅れになるよう Cdamp = I/τ
+  //   （index2従来の rate≈dt*6 → τ≈0.17s の感触に合わせる）
+  const tau = 0.18;
+  const dampRoll = Ixx / tau, dampPitch = Iyy / tau, dampYaw = Izz / tau;
+
+  // 制御モーメント係数：フル舵(±1)で定常最大レートに達するよう Cctrl = Cdamp·rateMax
+  const ctrlRoll = dampRoll * p.rollRateMax;
+  const ctrlPitch = dampPitch * p.pitchRateMax;
+  const ctrlYaw = dampYaw * p.yawRateMax;
+
+  // 横・方向の安定モーメント係数（βに対する強さ）。減衰基準にスケールし後で実測調整。
+  const weathercock = dampYaw * 2.0;   // 風見安定（βを減らす向きのヨー）
+  const dihedral = dampRoll * 1.0;     // 上反角効果（βと逆向きのロール）
+
+  return { Ixx, Iyy, Izz, dampRoll, dampPitch, dampYaw,
+           ctrlRoll, ctrlPitch, ctrlYaw, weathercock, dihedral };
+}
+
+function stepPhysics(state, controls, dt, opponent) {
+  const p = state.params;
+  const quat = state.quat;
+
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
+
+  const V = Math.max(state.velocity.length(), 0.1);
+  const invQuat = quat.clone().invert();
+  const vBody = state.velocity.clone().applyQuaternion(invQuat);
+
+  const forwardSpeed = Math.max(-vBody.z, 0.1);
+  const alpha = Math.atan2(-vBody.y, forwardSpeed); // 迎角
+  const beta = Math.atan2(vBody.x, forwardSpeed);   // 横滑り角
+
+  // 高度が上がるほど空気密度が下がり、同じ速度でも揚力・抗力・舵の効きが弱くなる
+  const rho = airDensityAt(state.position.y);
+  const qDyn = 0.5 * rho * V * V;
+
+  // --- 拡張モード判定：自機の現在速度が閾値以下、かつ相手との距離が閾値以下の時だけ発動。
+  //     ジェット機はG制限・AoA制限を機体の限界まで解放（コブラ機動）、レシプロ機は
+  //     コンバットフラップを展開してCLmaxを引き上げる（代わりに抗力が増える）。
+  //     いずれも「低速・近距離の格闘戦での全力機動」を再現するもの。 ---
+  const distToOpp = opponent ? state.position.distanceTo(opponent.position) : Infinity;
+  const extendedActive = computeExtendedActive(p, V, distToOpp);
+  const maxGNow = extendedActive && p.maxGExtended ? p.maxGExtended : (p.maxG || MAX_G);
+  const flapsActive = extendedActive && p.category === "prop" && !!p.flapCLAlphaBonus;
+
+  // --- 揚力係数（失速を考慮）。フラップ展開中は揚力傾斜(CLalpha)と失速角そのものを
+  //     引き上げて、CLmaxを底上げする（＝同じG制限でもコーナー速度が下がる）。 ---
+  const effCLalpha = p.CLalpha + (flapsActive ? p.flapCLAlphaBonus : 0);
+  const effStallAoA = p.stallAoA + (flapsActive ? (p.flapStallAoABonus || 0) : 0);
+  const alphaAbs = Math.abs(alpha);
+  let CL;
+  if (alphaAbs <= effStallAoA) {
+    CL = effCLalpha * alpha;
+  } else {
+    const over = alphaAbs - effStallAoA;
+    const falloff = Math.max(0.12, 1 - over / p.extendedRange);
+    CL = Math.sign(alpha) * (effCLalpha * effStallAoA) * falloff;
+  }
+
+  // --- 最大過負荷制限（G-リミッター）：構造限界を超える荷重を出せないようにする。
+  //     CLの段階でクランプしておくことで、抗力(CD)も「実際に出ている揚力」に対して
+  //     一貫した値になる（クランプ前の生のCLで抗力だけ計算すると、G制限で切り捨てられる
+  //     はずの揚力の分まで誘導抗力を払う、という物理的に矛盾した無駄が生じてしまう）。
+  const maxLiftMag = maxGNow * p.mass * G;
+  const CLmaxForG = maxLiftMag / (qDyn * p.wingArea);
+  CL = THREE.MathUtils.clamp(CL, -CLmaxForG, CLmaxForG);
+
+  const CD = p.CD0 + (flapsActive ? (p.flapDragBonus || 0) : 0) + p.k * CL * CL + (state.airbrake ? 0.07 : 0) + Math.abs(beta) * 0.15;
+
+  // --- 力の計算 ---
+  const velDir = state.velocity.clone().normalize();
+  let liftDir = up.clone().sub(velDir.clone().multiplyScalar(up.dot(velDir)));
+  if (liftDir.lengthSq() < 1e-6) liftDir = up.clone();
+  liftDir.normalize();
+
+  let liftMag = qDyn * p.wingArea * CL;
+  const dragMag = qDyn * p.wingArea * CD;
+
+  liftMag = THREE.MathUtils.clamp(liftMag, -maxLiftMag, maxLiftMag); // 数値誤差対策の保険
+
+  const liftForce = liftDir.multiplyScalar(liftMag);
+  const dragForce = velDir.clone().multiplyScalar(-dragMag);
+  const thrustForce = forward.clone().multiplyScalar(thrustMagnitude(p, V, state.throttle));
+  const gravityForce = new THREE.Vector3(0, -p.mass * G, 0);
+
+  // --- 横方向の力（垂直尾翼の復元力）：ピッチ方向の揚力と対になる仕組みで、
+  //     横滑り角(beta)に応じて飛行経路を機首方向へ戻す力を発生させる。
+  //     これがないと、ラダーで機首を振っても進行方向がまったく追従しなかった。
+  const CY_BETA = 3.2; // per rad（経験的な値）
+  const CY = THREE.MathUtils.clamp(-CY_BETA * beta, -2.0, 2.0);
+  const sideForceMag = qDyn * p.wingArea * 0.28 * CY;
+  const sideForce = right.clone().multiplyScalar(sideForceMag);
+
+  const total = new THREE.Vector3().add(liftForce).add(dragForce).add(thrustForce).add(gravityForce).add(sideForce);
+  const accel = total.divideScalar(p.mass);
+
+  // --- 旋回率：飛行経路（速度ベクトル）が1秒あたり何度向きを変えているか ---
+  const velDirBefore = state.velocity.clone().normalize();
+
+  state.velocity.addScaledVector(accel, dt);
+  state.position.addScaledVector(state.velocity, dt);
+
+  const velDirAfter = state.velocity.clone().normalize();
+  state.hud.turnRate = (velDirBefore.angleTo(velDirAfter) / dt) * (180 / Math.PI);
+
+  // --- 角速度（操縦効率は動圧に応じて変化＝低速や高高度の薄い空気では効きが悪い）。
+  //     基準はあくまで海面高度の80m/sに固定し、qDyn側の高度補正だけで
+  //     「高高度では同じ速度でも舵が効きにくくなる」を表現する ---
+  const qRef = 0.5 * RHO_SEA_LEVEL * 80 * 80;
+  const ctrlEff = THREE.MathUtils.clamp(qDyn / qRef, 0.15, 1.4);
+
+  // --- AoAリミッター：機体ごとの基本上限（p.maxAoA）を使う。
+  //     拡張モード中（低速・近距離の格闘戦）はコブラ機動級の上限、またはフラップ展開分の
+  //     上限拡大まで開放する（effectiveMaxAoAで判定。CL計算のeffStallAoAと整合させている） ---
+  const maxAoA = effectiveMaxAoA(p, extendedActive);
+
+  const AOA_LIMIT_MARGIN = 2.5 * DEG;
+  const aoaExceeded = alphaAbs > maxAoA;
+  let elevatorCmd = controls.elevator;
+  // AoAリミッター（フライ・バイ・ワイヤの保護）はジェット機のみが持つ。レシプロ機には
+  // この保護が存在しないため、舵入力がそのまま素通しになり、本当に失速角を超え得る
+  // （超えた分は下の非対称失速モーメント処理で扱う）。
+  if (p.category === "jet") {
+    if (elevatorCmd > 0) {
+      const room = maxAoA - alpha;
+      elevatorCmd *= THREE.MathUtils.clamp(room / AOA_LIMIT_MARGIN, 0, 1);
+      if (room < 0) elevatorCmd = -1;
+    } else if (elevatorCmd < 0) {
+      const room = maxAoA + alpha;
+      elevatorCmd *= THREE.MathUtils.clamp(room / AOA_LIMIT_MARGIN, 0, 1);
+      if (room < 0) elevatorCmd = 1;
+    }
+  }
+
+  // 失速中は気流が乱れて舵（特にラダー）の効きが落ちる
+  const stallCtrlFactor = alphaAbs > p.stallAoA
+    ? THREE.MathUtils.clamp(1 - (alphaAbs - p.stallAoA) / p.extendedRange, 0.15, 1)
+    : 1;
+  // 横滑りが大きくなるほどラダーの追加の効きも落ちる（乱れた気流＋機体側の復元力とつり合い、
+  // 際限なく横滑りが増え続けるのを防ぐ）
+  const betaCtrlFactor = THREE.MathUtils.clamp(1 - Math.abs(beta) / (35 * DEG), 0.2, 1);
+
+  // === 6DOF回転運動（移行版）：舵入力→目標レート収束（キネマティック）を廃し、
+  //     実際のモーメントを慣性で割った角加速度を積分する。制御・減衰係数は既存の最大
+  //     レートから校正済みなので操作感・機体バランスは保ちつつ、横滑り(weathercock/
+  //     dihedral)や失速後の非対称挙動(機首落ち・スナップロール)が計算結果として創発する。===
+  if (!p._fm) p._fm = deriveFlightModel(p);
+  const fm = p._fm;
+  const qFac = ctrlEff; // 動圧に応じた効き（低速・高高度で弱くなる）
+
+  // 制御モーメント（フル舵で定常最大レートになるよう校正）。ジェットはelevatorCmdに
+  // AoAリミッターが既に掛かっている。失速中はstallCtrlFactorでラダーの効きが落ちる。
+  let Mroll  = fm.ctrlRoll  * (-controls.aileron) * qFac;
+  let Mpitch = fm.ctrlPitch * elevatorCmd         * qFac;
+  let Myaw   = fm.ctrlYaw   * (-controls.rudder)  * qFac * stallCtrlFactor;
+
+  // 減衰モーメント（角速度に比例して抵抗）
+  Mroll  -= fm.dampRoll  * state.angVel.p * qFac;
+  Mpitch -= fm.dampPitch * state.angVel.q * qFac;
+  Myaw   -= fm.dampYaw   * state.angVel.r * qFac;
+
+  // 横・方向の空力モーメント（横滑りβから創発）：weathercockで機首を相対風へ向けβを
+  // 減らし、dihedralでβと逆向きにロールする（＝旋回協調・ダッチロールの素）
+  Myaw  -= fm.weathercock * beta * qFac;
+  Mroll += fm.dihedral    * beta * qFac;
+
+  // 失速後の非対称モーメント（機首落ち＋スナップロール）：既存ロジックをモーメントに統合。
+  // 舵入力に関係なく機体側から自律的に発生する。ジェットはAoAリミッターで通常ここに入らない。
+  if (alphaAbs > effStallAoA && p.cgFraction != null && p.cpFraction != null) {
+    if (!p._moment) p._moment = deriveMomentPoints(p);
+    const mm = p._moment;
+    const rollCoupling = (state.angVel.p * mm.wingSemiSpan) / Math.max(forwardSpeed, 1);
+    const localCL = (a) => {
+      const aAbs = Math.abs(a);
+      if (aAbs <= effStallAoA) return effCLalpha * a;
+      const over = aAbs - effStallAoA;
+      const falloff = Math.max(0.12, 1 - over / p.extendedRange);
+      return Math.sign(a) * (effCLalpha * effStallAoA) * falloff;
+    };
+    const halfWingArea = p.wingArea * 0.5;
+    const liftLeft  = qDyn * halfWingArea * localCL(alpha - rollCoupling);
+    const liftRight = qDyn * halfWingArea * localCL(alpha + rollCoupling);
+    const liftTail  = qDyn * (p.wingArea * 0.15) * (effCLalpha * alpha * 0.5);
+    const armWing = (mm.wingCPFrac - mm.cgX) * p.fuselageLen;
+    const armTail = (mm.tailCPFrac - mm.cgX) * p.fuselageLen;
+    Mpitch += -armWing * (liftLeft + liftRight) - armTail * liftTail; // 機首下げ
+    Mroll  += (liftLeft - liftRight) * mm.wingSemiSpan;               // 自己増幅ロール
+  }
+
+  // 角加速度 = モーメント / 慣性、を積分
+  state.angVel.p += (Mroll  / fm.Ixx) * dt;
+  state.angVel.q += (Mpitch / fm.Iyy) * dt;
+  state.angVel.r += (Myaw   / fm.Izz) * dt;
+
+  quat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), state.angVel.q * dt));
+  quat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), state.angVel.r * dt));
+  quat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), state.angVel.p * dt));
+  quat.normalize();
+
+  // --- スロットル・エアブレーキ ---
+  if (controls.throttleUp) state.throttle = Math.min(1, state.throttle + dt * 0.6);
+  if (controls.throttleDown) state.throttle = Math.max(0, state.throttle - dt * 0.6);
+  state.airbrake = !!controls.airbrake;
+
+  // --- 地面衝突判定 ---
+  if (state.position.y < 5) {
+    state.position.y = 5;
+    state.alive = false;
+  }
+
+  state.mesh.position.copy(state.position);
+  state.mesh.quaternion.copy(quat);
+
+  state.hud.alpha = alpha / DEG;
+  state.hud.speed = V;
+  state.hud.forwardSpeed = forwardSpeed;
+  state.hud.gforce = liftMag / (p.mass * G);
+  state.hud.stall = alphaAbs > effStallAoA; // フラップ展開中は拡大後の失速角を基準にする（誤警告防止）
+  state.hud.flapsActive = flapsActive;
+}
+
+
+// ================================================================
+// 7. プレイヤー入力
+// ================================================================
+const keys = {};
+// テキスト入力欄（フィードバック欄・部屋コード欄など）にフォーカスがある間は、
+// タイプした文字が操縦入力として拾われてしまわないようにする
+function isTypingInField() {
+  const el = document.activeElement;
+  return !!el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT");
+}
+window.addEventListener("keydown", (e) => { if (!isTypingInField()) keys[e.key.toLowerCase()] = true; });
+window.addEventListener("keyup", (e) => { if (!isTypingInField()) keys[e.key.toLowerCase()] = false; });
+
+function readPlayerControls() {
+  return {
+    elevator: (keys["s"] ? 1 : 0) - (keys["w"] ? 1 : 0),
+    aileron: (keys["d"] ? 1 : 0) - (keys["a"] ? 1 : 0),
+    rudder: (keys["e"] ? 1 : 0) - (keys["q"] ? 1 : 0),
+    throttleUp: !!keys["r"],
+    throttleDown: !!keys["f"],
+    airbrake: !!keys[" "],
+  };
+}
+
+
+// ================================================================
+// 8. 敵AI：優先度1＝失速回避、優先度2＝高度セーフティ、優先度3＝状況判断した追尾
+// ================================================================
+function wingsLevelAileron(ai, gain) {
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(ai.quat);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(ai.quat);
+  const bank = Math.atan2(right.y, up.y);
+  return THREE.MathUtils.clamp(bank * gain, -1, 1);
+}
+
+function computeAIControls(ai, target, dt) {
+  const p = ai.params;
+  const alphaDeg = ai.hud.alpha;
+  const alphaAbs = Math.abs(alphaDeg) * DEG;
+
+  // 拡張モード判定（stepPhysics側のG/AoAリミッター拡張と全く同じ条件をcomputeExtendedActiveで判定）。
+  // 失速回避のしきい値と追尾のゲインの両方にこの結果を反映する。
+  const distToTarget = ai.position.distanceTo(target.position);
+  const extendedActive = computeExtendedActive(p, ai.hud.speed, distToTarget);
+
+  // 失速回避の危険域は、拡張モード中はコブラ機動用の拡張上限／フラップ展開後の拡大失速角を
+  // 基準にする（拡張モードは通常の失速角を超えることを前提とした機動なので、通常の失速角
+  // 基準のままだと拡張AoAへ踏み込む前に安全策で引き戻されてしまう）
+  const stallCeiling = effectiveMaxAoA(p, extendedActive);
+
+  // ヒステリシス付きで失速危険域の出入りを判定する
+  if (!ai.stallRecovering && alphaAbs > stallCeiling - AI_STALL_ENTER_MARGIN) {
+    ai.stallRecovering = true;
+  } else if (ai.stallRecovering && alphaAbs < stallCeiling - AI_STALL_EXIT_MARGIN) {
+    ai.stallRecovering = false;
+  }
+
+  // --- 優先度1：失速回避 ---
+  // 追尾を中断し、迎角を安全側へ戻しつつウイングレベルに戻す（実機の失速回復操作と同じ考え方）
+  if (ai.stallRecovering) {
+    return {
+      elevator: -Math.sign(alphaDeg || 1) * 0.7,
+      aileron: wingsLevelAileron(ai, 1.5),
+      rudder: 0,
+      throttleUp: true,
+      throttleDown: false,
+      airbrake: false,
+    };
+  }
+
+  // --- 優先度2：高度セーフティ ---
+  // 低空、または低空付近で急に沈下している時は追尾を中断し、ウイングレベルに戻して機首を上げる
+  const vSpeed = ai.velocity.y;
+  if (!ai.altRecovering && (ai.position.y < AI_ALT_FLOOR || (ai.position.y < AI_ALT_FLOOR * 1.6 && vSpeed < AI_ALT_DESCENT_WARN))) {
+    ai.altRecovering = true;
+  } else if (ai.altRecovering && ai.position.y > AI_ALT_SAFE && vSpeed > -10) {
+    ai.altRecovering = false;
+  }
+  if (ai.altRecovering) {
+    return {
+      elevator: 0.55,
+      aileron: wingsLevelAileron(ai, 1.5),
+      rudder: 0,
+      throttleUp: true,
+      throttleDown: false,
+      airbrake: false,
+    };
+  }
+
+  const toTarget = target.position.clone().sub(ai.position);
+  const dist = distToTarget;
+  const toTargetDir = toTarget.clone().normalize();
+
+  // 相手（プレイヤー）の機首から見た自機の角度誤差：相手が自機を前方何度以内に捉えているか
+  // （＝自機が狙われているか）。被弾回避の判定に使う。
+  const localOnAngle = toTargetDir.clone().negate().applyQuaternion(target.quat.clone().invert());
+  const angleOnDeg = Math.acos(THREE.MathUtils.clamp(-localOnAngle.z, -1, 1)) * 180 / Math.PI;
+
+  // --- 優先度2.5：被弾回避 ---
+  // 相手の機首が自機を捉えつつある時は、通常の追尾より優先してその方向へ最大舵で切り返し、
+  // 相手の照準（射線）から外れることを優先する。実際のガンコーン（±3°）より広い角度で
+  // 早めに危険を察知し、命中判定が下る前に回避行動へ移れるようにしている。
+  if (!ai.evading && angleOnDeg < AI_THREAT_CONE_DEG && dist < GUN_RANGE && dist > GUN_MIN_RANGE) {
+    ai.evading = true;
+  } else if (ai.evading && (angleOnDeg > AI_THREAT_CONE_DEG + AI_THREAT_EXIT_MARGIN_DEG || dist > GUN_RANGE * 1.2)) {
+    ai.evading = false;
+  }
+
+  const pitchGainBase = extendedActive ? 5 : 2.4;
+
+  if (ai.evading) {
+    // ブレイクターン：相手の方向へ最大舵で切り返し、相手の照準の先読み（リード）を無効化する
+    const localDir = toTargetDir.clone().applyQuaternion(ai.quat.clone().invert());
+    const forwardComp = Math.max(-localDir.z, 0.05);
+    const pitchErr = Math.atan2(localDir.y, forwardComp);
+    const yawErr = Math.atan2(localDir.x, forwardComp);
+    const rollDamp = (ai.angVel.p / p.rollRateMax) * 0.5;
+    const pitchDamp = (ai.angVel.q / p.pitchRateMax) * 0.45;
+    let elevator = THREE.MathUtils.clamp((pitchErr * pitchGainBase - pitchDamp) * AI_BREAK_GAIN_MULT, -1, 1);
+    const alphaMarginFactor = THREE.MathUtils.clamp(1 - alphaAbs / (p.stallAoA * 0.9), 0.25, 1);
+    if (elevator > 0) elevator *= alphaMarginFactor;
+    return {
+      elevator,
+      aileron: THREE.MathUtils.clamp((yawErr * 1.5 + rollDamp) * AI_BREAK_GAIN_MULT, -1, 1),
+      rudder: THREE.MathUtils.clamp(yawErr * 0.4, -1, 1),
+      throttleUp: true,
+      throttleDown: false,
+      airbrake: false,
+    };
+  }
+
+  // --- 優先度3：追尾（常にリードパーシュート。スロットルだけが唯一の駆け引き要素） ---
+  // 「結局これはケツの追っかけ合いなので、常に最適な先読み点へ機首を向け続け、
+  //  いつ速度を落とすかだけが本当の駆け引きになる」という考え方に基づき、狙い方は
+  //  常にリードパーシュート（未来位置予測）一本にしている。以前はここでシザース／
+  //  エネルギー戦／ワンサークルを分類していたが、分類のための状態管理（旋回方向の
+  //  一致判定・角度誤差の進展率など）がバグの温床になっていた上、常時フルスロットル
+  //  一辺倒だと「プレイヤーが意図的に減速してきつい旋回戦を仕掛けてきても、AIが
+  //  全く速度を合わせてこず退屈」という問題があったため、分類はやめてシンプルに戻した。
+  const closingTime = dist / Math.max(ai.hud.speed, 60);
+  const lead = target.velocity.clone().multiplyScalar(Math.min(closingTime, 2) * 0.4);
+  const aimPoint = target.position.clone().add(lead);
+
+  const desiredDir = aimPoint.sub(ai.position).normalize();
+  const localDir = desiredDir.clone().applyQuaternion(ai.quat.clone().invert());
+
+  const forwardComp = Math.max(-localDir.z, 0.05);
+  const pitchErr = Math.atan2(localDir.y, forwardComp);
+  const yawErr = Math.atan2(localDir.x, forwardComp);
+
+  // 不必要に大きな迎角を取らせない：現在の迎角が「今使える上限」に近いほど、引き起こしの強さを弱める。
+  // 拡張モード中は拡張上限（コブラ機動域／フラップ展開後の拡大失速角）を基準にするので、
+  // 通常時のように早々に絞られない。
+  const marginRef = effectiveMaxAoA(p, extendedActive) * 0.9;
+  const alphaMarginFactor = THREE.MathUtils.clamp(1 - alphaAbs / marginRef, 0.25, 1);
+
+  // 角速度によるダンピングを加え、目標に対してなめらかに収束させる
+  // （以前は角度誤差だけの比例制御だったため、過剰なゲインでロール・ピッチが行き過ぎては
+  //   戻る、というグネグネした挙動になっていた）
+  const rollDamp = (ai.angVel.p / p.rollRateMax) * 0.5;
+  const pitchDamp = (ai.angVel.q / p.pitchRateMax) * 0.45;
+
+  const aileron = THREE.MathUtils.clamp(yawErr * 1.5 + rollDamp, -1, 1);
+  const rudder = THREE.MathUtils.clamp(yawErr * 0.4, -1, 1);
+  let elevator = THREE.MathUtils.clamp(pitchErr * pitchGainBase - pitchDamp, -1, 1);
+  if (elevator > 0) elevator *= alphaMarginFactor;
+
+  // --- スロットル：唯一の駆け引き要素 ---
+  // 近距離できつく旋回したい状況で、相手より明らかに速すぎる時だけ減速する。これにより、
+  // プレイヤーが意図的に減速して距離を詰め、きつい旋回戦を仕掛けてきた時、AIも相手の
+  // ペースを察知して自然に速度を合わせにいく（＝低速・近距離まで持ち込まれれば、拡張
+  // モード＝コブラ機動も誘発されうる）。それ以外は距離を詰める/保つため通常運用。
+  const wantsHardTurn = Math.abs(pitchErr) > AI_HARD_TURN_ANGLE || Math.abs(yawErr) > AI_HARD_TURN_ANGLE;
+  const speedRatio = ai.hud.speed / Math.max(target.hud.speed, 30);
+  const overspeedForTurn = dist < AI_CLOSE_RANGE && wantsHardTurn && speedRatio > AI_OVERSPEED_RATIO;
+
+  return {
+    elevator, aileron, rudder,
+    throttleUp: dist > 150 && !overspeedForTurn,
+    throttleDown: dist < 100 || overspeedForTurn,
+    airbrake: dist < 60 && ai.hud.speed > 260,
+  };
+}
+
+
+// ================================================================
+// 9. 機体インスタンス管理（プレイヤー機・敵機は選択式）
+// ================================================================
+let player, enemy;
+
+// side="A": プレイヤーは北側(0,4000,0)出撃／side="B": プレイヤーは南側(0,4000,-1800)出撃。
+// オンライン対戦の両クライアントで座標系を共有するため、互いに向き合う位置に出撃させる。
+function resetGame(playerType, enemyType, side) {
+  scene.children = scene.children.filter((c) => !c.userData.isAircraft);
+
+  const spawnNorth = { pos: new THREE.Vector3(0, 4000, 0), hdg: 0 };
+  const spawnSouth = { pos: new THREE.Vector3(0, 4000, -1800), hdg: 180 };
+  const mySpawn = side === "B" ? spawnSouth : spawnNorth;
+  const oppSpawn = side === "B" ? spawnNorth : spawnSouth;
+
+  player = createState(playerType || "F16", mySpawn.pos, mySpawn.hdg, true);
+  enemy = createState(enemyType || "SU27", oppSpawn.pos, oppSpawn.hdg, false);
+  player.mesh.userData.isAircraft = true;
+  enemy.mesh.userData.isAircraft = true;
+  player.underFireMeter = 0;
+  enemy.underFireMeter = 0;
+  gameOver = false;
+  camInit = false;
+
+  enemyPanelLabelEl.textContent = `ENEMY (${enemy.params.label})`;
+  matchupLabelEl.textContent = `自機: ${player.params.label} ／ 敵機: ${enemy.params.label}`;
+}
+
+
+// ================================================================
+// 10. カメラ制御：常に自機の姿勢を安定して映す追従カメラ。
+//     Shiftを押している間は「カメラ－自機－敵機」が一直線になる位置へ回り込み、
+//     敵機がどこにいても（真後ろ・真上などでも）自機越しに必ず両方がフレームに収まるようにする。
+// ================================================================
+const camPosSmoothed = new THREE.Vector3();
+const camLookSmoothed = new THREE.Vector3();
+const camRefQuat = new THREE.Quaternion();
+let camInit = false;
+let camFOV = 80;
+let camDistFactor = 1;
+let prevShiftHeld = false;
+let camTransitionTimer = 0; // Shiftの押下/解放の直後だけ、切り替えを速くするためのタイマー
+
+function updateCamera(dt) {
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quat);
+
+  // ロール成分だけを除いた「機首の向き（ヨー・ピッチ）」を基準姿勢にする。
+  // ほぼ真上/真下を向いたときのジンバルロックによる視点破綻を避けるため、
+  // その場合は基準アップベクトルを切り替える。
+  const upRef = Math.abs(forward.dot(WORLD_UP)) > 0.97 ? FALLBACK_UP : WORLD_UP;
+  const lookMat = new THREE.Matrix4().lookAt(new THREE.Vector3(0, 0, 0), forward, upRef);
+  const rawRefQuat = new THREE.Quaternion().setFromRotationMatrix(lookMat);
+  camRefQuat.slerp(rawRefQuat, camInit ? 1 - Math.exp(-dt * 4) : 1);
+
+  // 針路方向の速度が基準より遅いほどカメラを自機に寄せ、速いほど離す
+  // （失速や急減速を、視覚的な「寄り」で体感できるようにする）
+  const speedRatio = THREE.MathUtils.clamp((player.hud.forwardSpeed || player.hud.speed) / REF_SPEED, 0.3, 1.5);
+  const targetDistFactor = THREE.MathUtils.clamp(0.6 + 0.4 * speedRatio, 0.6, 1.2);
+  camDistFactor += (targetDistFactor - camDistFactor) * (1 - Math.exp(-dt * 2.5));
+
+  const shiftHeld = !!keys["shift"];
+  if (shiftHeld !== prevShiftHeld) {
+    camTransitionTimer = 0.6; // 切り替わった直後の0.6秒間は高速レートで追従させる
+    prevShiftHeld = shiftHeld;
+  }
+  camTransitionTimer = Math.max(0, camTransitionTimer - dt);
+
+  let desiredCamPos, desiredLookAt;
+
+  if (shiftHeld) {
+    // 敵機と反対側（自機を挟んで敵機の真逆）へ回り込む＝カメラ－自機－敵機が一直線になる。
+    // 敵機が真後ろなら自機の正面が、真上なら自機の腹が見える、という具合に自然と決まる。
+    const sep = player.position.clone().sub(enemy.position);
+    const awayDir = sep.lengthSq() > 1 ? sep.normalize() : forward.clone().negate();
+    desiredCamPos = player.position.clone().addScaledVector(awayDir, SHIFT_CAM_DIST);
+    desiredLookAt = enemy.position.clone();
+  } else {
+    // 通常時：自機の姿勢を安定して映す追従カメラ。視線は常に自機（少し先）を固定して見る。
+    const offset = new THREE.Vector3(0, 4.5, 13).multiplyScalar(camDistFactor).applyQuaternion(camRefQuat);
+    desiredCamPos = player.position.clone().add(offset);
+    desiredLookAt = player.position.clone().addScaledVector(forward, 6);
+  }
+
+  if (!camInit) {
+    camPosSmoothed.copy(desiredCamPos);
+    camLookSmoothed.copy(desiredLookAt);
+    camInit = true;
+  }
+  // 「スッと」切り替わるよう、Shiftの押下・解放どちらの直後も速いレートで追従させ、
+  // 切り替えが落ち着いたら通常時は元の穏やかなレートに戻す
+  const fastTransition = shiftHeld || camTransitionTimer > 0;
+  const posRate = 1 - Math.exp(-dt * (fastTransition ? 10 : 6));
+  camPosSmoothed.lerp(desiredCamPos, posRate);
+  camLookSmoothed.lerp(desiredLookAt, posRate);
+  camera.position.copy(camPosSmoothed);
+  camera.lookAt(camLookSmoothed);
+
+  // 敵機との距離に応じてズーム（FOVを狭める）し、遠距離でも姿勢を判別しやすくする
+  const distToEnemy = player.position.distanceTo(enemy.position);
+  const targetFOV = THREE.MathUtils.clamp(BASE_FOV - distToEnemy * 0.018, 20, BASE_FOV);
+  camFOV += (targetFOV - camFOV) * (1 - Math.exp(-dt * 3));
+  if (Math.abs(camera.fov - camFOV) > 0.01) {
+    camera.fov = camFOV;
+    camera.updateProjectionMatrix();
+  }
+}
+
+
+// ================================================================
+// 11. HUDインジケーター更新（敵機マーカー／ADI）
+// ================================================================
+
+// --- 11-1. 敵機ハイライト：3D空間の発光マーカー＋画面外インジケーター ---
+function updateEnemyIndicator() {
+  // 距離に応じてサイズを調整し、常に画面上で見失わないサイズを保つビーコン
+  const dist = camera.position.distanceTo(enemy.position);
+  const markerPos = enemy.position.clone().addScaledVector(new THREE.Vector3(0, 1, 0).applyQuaternion(enemy.quat), 5.5);
+  enemyMarkerSprite.position.copy(markerPos);
+  const scale = THREE.MathUtils.clamp(dist * 0.022, 3, 70);
+  enemyMarkerSprite.scale.set(scale, scale, scale);
+
+  // カメラのローカル基底で敵機の方角を求め、画面内なら実際の投影位置、
+  // 画面外なら画面端に矢印で表示する
+  const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+  const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+  const camFwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+
+  // 敵機の姿勢（バンク角）をカメラの画面平面に投影し、マーカーの向きに反映する
+  // ＝マーカーの傾きを見れば敵機がどれだけ傾いているか分かる
+  const enemyUp = new THREE.Vector3(0, 1, 0).applyQuaternion(enemy.quat);
+  const upScreenX = enemyUp.dot(camRight);
+  const upScreenY = enemyUp.dot(camUp);
+  const bankAngle = Math.atan2(upScreenX, upScreenY);
+  enemyMarkerSprite.material.rotation = -bankAngle;
+
+  const toEnemy = enemy.position.clone().sub(camera.position).normalize();
+
+  const x = toEnemy.dot(camRight);
+  const y = toEnemy.dot(camUp);
+  const z = toEnemy.dot(camFwd);
+
+  const vFov = (camera.fov * Math.PI) / 180;
+  const tanV = Math.tan(vFov / 2);
+  const tanH = tanV * camera.aspect;
+
+  let screenX, screenY, offscreen;
+  if (z > 0.05) {
+    screenX = x / (z * tanH);
+    screenY = y / (z * tanV);
+    offscreen = Math.abs(screenX) > 0.9 || Math.abs(screenY) > 0.9;
+  } else {
+    offscreen = true;
+    screenX = x;
+    screenY = y;
+  }
+
+  if (offscreen) {
+    const angle = Math.atan2(screenX, screenY);
+    const edge = 0.85;
+    screenX = Math.sin(angle) * edge;
+    screenY = Math.cos(angle) * edge;
+    enemyArrowEl.style.display = "block";
+    enemyArrowEl.style.transform = `rotate(${angle * (180 / Math.PI)}deg)`;
+  } else {
+    enemyArrowEl.style.display = "none";
+  }
+
+  const px = (screenX * 0.5 + 0.5) * window.innerWidth;
+  const py = (1 - (screenY * 0.5 + 0.5)) * window.innerHeight;
+  enemyIndicatorEl.style.left = px + "px";
+  enemyIndicatorEl.style.top = py + "px";
+  enemyDistEl.textContent = Math.round(dist) + " m";
+}
+
+// --- 11-2. 水平姿勢指示計（ADI）：自機のピッチ・バンク角を常時表示する ---
+function updateADI() {
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quat);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(player.quat);
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(player.quat);
+
+  const pitchDeg = (Math.asin(THREE.MathUtils.clamp(forward.y, -1, 1)) * 180) / Math.PI;
+  const bankRad = Math.atan2(right.y, up.y);
+  const bankDeg = (bankRad * 180) / Math.PI;
+
+  const pitchPx = THREE.MathUtils.clamp(pitchDeg, -60, 60) * ADI_PX_PER_DEG;
+  adiHorizonEl.style.transform = `rotate(${bankDeg}deg) translateY(${pitchPx}px)`;
+  adiBankPointerEl.style.transform = `rotate(${bankDeg}deg)`;
+}
+
+
+// ================================================================
+// 12. 弾道シミュレーション・命中判定
+// ================================================================
+
+// --- 12-1. 弾道シミュレーション：M61バルカン相当の特性（初速・重力落下・空気抵抗による減速）
+//     で仮想的な弾を飛ばし、実際に相手に当たるかどうかを判定する。
+//     弾速は無限ではないため、相手が動いていればリード（先読み）していない射撃は外れる。 ---
+function simulateGunTrajectory(attacker, target) {
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(attacker.quat);
+  const bulletPos = attacker.position.clone();
+  const bulletVel = attacker.velocity.clone().addScaledVector(forward, BULLET_MUZZLE_V);
+  const targetPos = target.position.clone();
+  const targetVel = target.velocity.clone(); // 弾の飛行中は等速直線運動と仮定（簡略化）
+
+  const points = [bulletPos.clone()];
+  let closestDist = bulletPos.distanceTo(targetPos);
+
+  for (let t = BULLET_SIM_DT; t <= BULLET_SIM_MAXTIME; t += BULLET_SIM_DT) {
+    const speed = bulletVel.length();
+    if (speed > 1) {
+      const dragDecel = BULLET_DRAG_K * speed * speed;
+      bulletVel.addScaledVector(bulletVel.clone().normalize(), -dragDecel * BULLET_SIM_DT);
+    }
+    bulletVel.y -= G * BULLET_SIM_DT;
+    bulletPos.addScaledVector(bulletVel, BULLET_SIM_DT);
+    targetPos.addScaledVector(targetVel, BULLET_SIM_DT);
+
+    points.push(bulletPos.clone());
+
+    const d = bulletPos.distanceTo(targetPos);
+    if (d < closestDist) closestDist = d;
+    if (bulletPos.distanceTo(attacker.position) > GUN_RANGE * 1.6) break;
+  }
+
+  return { points, closestDist };
+}
+
+// --- 12-2. ガン照準・撃墜判定：実際の弾道が命中半径内を通過した瞬間に即時撃墜する ---
+function updateGunSolution(attacker, target, dt) {
+  const dist = attacker.position.distanceTo(target.position);
+  const { points, closestDist } = simulateGunTrajectory(attacker, target);
+
+  const inCone = dist > GUN_MIN_RANGE && dist < GUN_RANGE && closestDist < BULLET_HIT_RADIUS;
+  target.underFireMeter = inCone ? 1 : 0; // 即時撃墜。段階的な蓄積はしない
+  return { inCone, points };
+}
+
+
+// ================================================================
+// 13. メインループ・ゲームフロー
+// ================================================================
+let mode = null;        // "ai" | "online"（メニューにいる間は null）
+let running = false;
+let gameOver = false;
+let lastTime = performance.now();
+let lastEnemyInGuns = false;
+let lastGunPoints = [];
+
+function animate() {
+  const now = performance.now();
+  let dt = (now - lastTime) / 1000;
+  lastTime = now;
+  dt = Math.min(dt, 0.05);
+
+  if (running && !gameOver) {
+    const pControls = readPlayerControls();
+    stepPhysics(player, pControls, dt, enemy);
+
+    if (mode === "ai") {
+      const aControls = computeAIControls(enemy, player, dt);
+      stepPhysics(enemy, aControls, dt, player);
+    } else if (mode === "online") {
+      applyRemoteState(enemy, dt);
+      stateSendAccum += dt;
+      if (stateSendAccum >= STATE_SEND_INTERVAL) {
+        stateSendAccum = 0;
+        sendPlayerState();
+      }
+    }
+
+    const playerInGunsResult = updateGunSolution(enemy, player, dt);
+    const enemyInGunsResult = updateGunSolution(player, enemy, dt);
+    lastEnemyInGuns = enemyInGunsResult.inCone;
+    lastGunPoints = enemyInGunsResult.points;
+
+    gunsFlashEl.style.opacity = enemyInGunsResult.inCone ? 1 : 0;
+
+    playerMeterFill.style.width = (player.underFireMeter * 100) + "%";
+    enemyMeterFill.style.width = (enemy.underFireMeter * 100) + "%";
+
+    spdEl.textContent = Math.round(player.hud.speed * 3.6);
+    altEl.textContent = Math.round(player.position.y);
+    thrEl.textContent = Math.round(player.throttle * 100);
+    gEl.textContent = player.hud.gforce.toFixed(1);
+    aoaEl.textContent = Math.round(player.hud.alpha);
+    turnRateEl.textContent = Math.round(player.hud.turnRate);
+    stallWarnEl.style.display = player.hud.stall ? "block" : "none";
+    flapsWarnEl.style.display = player.hud.flapsActive ? "block" : "none";
+
+    // 敵機のステータス表示（フィードバック確認用。右上の×またはIキーで消せる）
+    espdEl.textContent = Math.round(enemy.hud.speed * 3.6);
+    ealtEl.textContent = Math.round(enemy.position.y);
+    ethrEl.textContent = Math.round(enemy.throttle * 100);
+    egEl.textContent = enemy.hud.gforce.toFixed(1);
+    eaoaEl.textContent = Math.round(enemy.hud.alpha);
+    eturnRateEl.textContent = Math.round(enemy.hud.turnRate);
+
+    if (mode === "ai") {
+      // シングルプレイは両者ともローカルで完全に物理シミュレーションしているため、
+      // 自分・相手どちらの撃墜も自分の端末だけで確定させてよい。
+      if (!player.alive || player.underFireMeter >= 1) {
+        endGame(false);
+      } else if (!enemy.alive || enemy.underFireMeter >= 1) {
+        endGame(true);
+      }
+    } else if (mode === "online") {
+      // オンライン対戦では「自分が撃墜されたかどうか」は自分の端末だけが正確に判定できる
+      // （相手の位置はネットワーク遅延を含む補間値のため）。撃墜された側が i_died を送り、
+      // 受け取った相手側が勝利を確定させる（自己申告方式）。
+      if (!player.alive || player.underFireMeter >= 1) {
+        endGame(false);
+        sendNet({ type: "i_died" });
+      }
+    }
+  }
+
+  updateCamera(dt);
+  updateEnemyIndicator();
+  updateADI();
+  updateGunLine(lastEnemyInGuns, lastGunPoints);
+  renderer.render(scene, camera);
+}
+
+resetGame("F16", "SU27");
+// requestAnimationFrame ではなく setInterval でループを駆動する
+// （一部のプレビュー環境で rAF が呼ばれ続けず画面が固まる問題への対策）
+setInterval(animate, 1000 / 60);
+
+
+// ================================================================
+// 14. メニュー・機体選択・オンライン対戦（ランダムマッチ／フレンドマッチ）
+// ================================================================
+// このセクションは「どの画面を出すか」「WebSocketで何を送受信するか」だけを扱う。
+// 飛行物理・命中判定は今まで通りローカルで計算し（6〜8, 12章）、オンライン時は
+// 敵機の表示だけをネットワークから受け取った状態に差し替える（applyRemoteState）。
+
+// --- 14-1. 画面切り替え ---
+const screens = {
+  menu: document.getElementById("screenMenu"),
+  category: document.getElementById("screenCategorySelect"),
+  joinRoom: document.getElementById("screenJoinRoom"),
+  waiting: document.getElementById("screenWaiting"),
+  select: document.getElementById("screenAircraftSelect"),
+  gameOver: document.getElementById("screenGameOver"),
+};
+function showScreen(name) {
+  Object.values(screens).forEach((el) => el.classList.remove("active"));
+  screens[name].classList.add("active");
+  centerMsg.style.display = "block";
+}
+function hideCenterMessage() {
+  centerMsg.style.display = "none";
+}
+
+// メニュー画面内の各種メッセージ欄（他のHUD要素と違い動的に生成されないので、ここで一括してconst化）
+const menuNoteEl = document.getElementById("menuNote");
+const joinRoomNoteEl = document.getElementById("joinRoomNote");
+const waitingTextEl = document.getElementById("waitingText");
+const roomCodeInputEl = document.getElementById("roomCodeInput");
+
+// --- 14-2. 機体選択グリッド ---
+const aircraftGridEl = document.getElementById("aircraftGrid");
+const selectTitleEl = document.getElementById("selectTitle");
+const selectNoteEl = document.getElementById("selectNote");
+const selectStatusEl = document.getElementById("selectStatus");
+
+function specRow(label, value) {
+  return `<div class="specRow"><span>${label}</span><span>${value}</span></div>`;
+}
+
+function buildAircraftGrid(category) {
+  aircraftGridEl.innerHTML = "";
+  orderForCategory(category).forEach((key) => {
+    const p = AIRCRAFT_DB[key];
+    const card = document.createElement("div");
+    card.className = "aircraftCard";
+    card.dataset.key = key;
+    const swatch = "#" + p.color.toString(16).padStart(6, "0");
+    card.innerHTML =
+      `<div class="acSwatch" style="background:${swatch}"></div>` +
+      `<div class="acName">${p.label}</div>` +
+      `<div class="acSpecs">` +
+      specRow("推力", Math.round(p.maxThrust / 1000) + " kN") +
+      specRow("質量", Math.round(p.mass) + " kg") +
+      specRow("G制限", p.maxG + " G") +
+      `</div>`;
+    card.addEventListener("click", () => onAircraftCardClick(key));
+    aircraftGridEl.appendChild(card);
+  });
+}
+
+function markSelectedCard(key) {
+  Array.from(aircraftGridEl.children).forEach((card) => {
+    card.classList.toggle("selected", card.dataset.key === key);
+  });
+}
+
+let aiStage = "player";       // "player" | "enemy"（1人プレイの選択ステップ）
+let aiPlayerChoice = null;
+let matchCategory = null;     // "jet" | "prop"（この対戦全体で使う機体カテゴリ）
+let pendingOnlineAction = null; // カテゴリ選択後に何をするか："random" | "create"（"join"はカテゴリ選択を挟まない）
+
+// --- 14-2b. カテゴリ選択（ジェット/レシプロ）---
+const categorySelectNoteEl = document.getElementById("categorySelectNote");
+
+function showCategorySelect(note) {
+  categorySelectNoteEl.textContent = note || "対戦に使う機体のカテゴリを選んでください。";
+  showScreen("category");
+}
+
+function onCategoryChosen(category) {
+  matchCategory = category;
+  if (mode === "ai") {
+    startAircraftSelectForPlayer();
+  } else if (mode === "online") {
+    waitingTextEl.textContent = "接続しています…";
+    showScreen("waiting");
+    if (pendingOnlineAction === "random") {
+      connectWS({ type: "queue_random", category }).catch((e) => {
+        returnToMenu("接続に失敗しました: " + e.message);
+      });
+    } else if (pendingOnlineAction === "create") {
+      connectWS({ type: "create_room", category }).catch((e) => {
+        returnToMenu("接続に失敗しました: " + e.message);
+      });
+    }
+  }
+}
+
+document.getElementById("btnCategoryJet").addEventListener("click", () => onCategoryChosen("jet"));
+document.getElementById("btnCategoryProp").addEventListener("click", () => onCategoryChosen("prop"));
+document.getElementById("btnCategoryBack").addEventListener("click", () => {
+  returnToMenu();
+});
+
+// 1人プレイで「自機を選ぶ」ステージへ（再戦時・選択のやり直し時など複数箇所から呼ばれる）
+function startAircraftSelectForPlayer() {
+  aiStage = "player";
+  showAircraftSelect("対戦する自機を選んでください。");
+}
+
+const CATEGORY_LABEL = { jet: "ジェット機", prop: "レシプロ機" };
+
+function showAircraftSelect(note) {
+  buildAircraftGrid(matchCategory);
+  const catLabel = CATEGORY_LABEL[matchCategory] || "";
+  if (mode === "ai") {
+    selectTitleEl.textContent =
+      (aiStage === "enemy" ? "機体を選択（敵機 / AI操縦）" : "機体を選択（自機）") + ` - ${catLabel}`;
+  } else {
+    selectTitleEl.textContent = `機体を選択 - ${catLabel}`;
+  }
+  selectNoteEl.textContent = note || "";
+  selectStatusEl.textContent = "";
+  markSelectedCard(null);
+  showScreen("select");
+}
+
+function onAircraftCardClick(key) {
+  markSelectedCard(key);
+  if (mode === "ai") {
+    if (aiStage === "player") {
+      aiPlayerChoice = key;
+      aiStage = "enemy";
+      showAircraftSelect("対戦する敵機（AI操縦）を選んでください。");
+    } else {
+      resetGame(aiPlayerChoice, key);
+      running = true;
+      lastTime = performance.now();
+      hideCenterMessage();
+      aiStage = "player";
+    }
+  } else if (mode === "online") {
+    myAircraftChoice = key;
+    sendNet({ type: "select_aircraft", aircraft: key });
+    selectStatusEl.textContent = opponentAircraftChoice
+      ? "対戦相手の準備を待っています…"
+      : "対戦相手の機体選択を待っています…";
+  }
+}
+
+// --- 14-3. ゲーム開始・終了画面 ---
+function startOnlineMatch() {
+  resetGame(myAircraftChoice, opponentAircraftChoice, onlineSide);
+  remoteState = null;
+  stateSendAccum = 0;
+  running = true;
+  lastTime = performance.now();
+  hideCenterMessage();
+}
+
+const btnPrimaryEl = document.getElementById("btnPrimary");
+
+function endGame(playerWon, customMessage) {
+  gameOver = true;
+  running = false;
+  showScreen("gameOver");
+
+  if (playerWon === null) {
+    // 相手の切断などで勝敗がつかずに終了した場合
+    msgTitle.textContent = "対戦終了";
+    msgBody.textContent = customMessage || "";
+    btnPrimaryEl.style.display = "none";
+    return;
+  }
+
+  msgTitle.textContent = playerWon ? "撃墜成功！" : "撃墜された…";
+  msgBody.textContent = customMessage || (playerWon ? "敵機を撃墜しました。" : "敵の射線に入ってしまいました。");
+  btnPrimaryEl.style.display = "";
+  btnPrimaryEl.disabled = false;
+  btnPrimaryEl.textContent = mode === "online" ? "もう一度（同じ相手と）" : "もう一度";
+  btnPrimaryEl.onclick = () => {
+    if (mode === "online") {
+      btnPrimaryEl.disabled = true;
+      btnPrimaryEl.textContent = "相手の準備を待っています…";
+      sendNet({ type: "rematch" });
+    } else {
+      startAircraftSelectForPlayer();
+    }
+  };
+}
+
+// メニューへ戻る（オンライン接続があれば安全に切断し、待機画面の背景をデフォルト編隊に戻す）。
+// 「戻る」「キャンセル」「相手退出」「サーバー切断」など複数箇所から必要になるため一本化している。
+function returnToMenu(note) {
+  leaveOnlineMatch();
+  mode = null;
+  running = false;
+  resetGame("F16", "SU27");
+  showScreen("menu");
+  menuNoteEl.textContent = note || "";
+}
+
+document.getElementById("btnToMenu").addEventListener("click", () => {
+  returnToMenu();
+});
+
+// --- 14-4. WebSocket通信 ---
+let ws = null;
+let onlineSide = null;               // "A" | "B"
+let myAircraftChoice = null;
+let opponentAircraftChoice = null;
+let remoteState = null;              // 相手機の最新ネットワーク状態（補間の目標値）
+let stateSendAccum = 0;
+const STATE_SEND_INTERVAL = 1 / 20;  // 状態送信は20Hzで十分（毎フレーム送ると帯域を無駄にする）
+
+const serverUrlInputEl = document.getElementById("serverUrlInput");
+
+function defaultServerUrl() {
+  if (location.protocol === "http:" || location.protocol === "https:") {
+    return `ws://${location.hostname}:8080`;
+  }
+  return "ws://localhost:8080"; // file:// で直接開いている場合の既定値
+}
+serverUrlInputEl.value = defaultServerUrl();
+
+function getServerUrl() {
+  return (serverUrlInputEl.value || "").trim() || defaultServerUrl();
+}
+
+function connectWS(initialMessage) {
+  return new Promise((resolve, reject) => {
+    let opened = false;
+    let sock;
+    try {
+      sock = new WebSocket(getServerUrl());
+    } catch (e) {
+      reject(e);
+      return;
+    }
+    sock.onopen = () => {
+      opened = true;
+      ws = sock;
+      if (initialMessage) sendNet(initialMessage);
+      resolve(sock);
+    };
+    sock.onerror = () => {
+      if (!opened) reject(new Error("サーバーに接続できませんでした"));
+    };
+    sock.onclose = () => {
+      if (ws === sock) {
+        ws = null;
+        handleServerDisconnect();
+      }
+    };
+    sock.onmessage = (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      handleServerMessage(msg);
+    };
+  });
+}
+
+function sendNet(msg) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+}
+
+function leaveOnlineMatch() {
+  if (ws) {
+    sendNet({ type: "leave_match" });
+    sendNet({ type: "cancel" });
+    ws.close();
+    ws = null;
+  }
+}
+
+function handleServerDisconnect() {
+  if (mode !== "online") return;
+  if (running && !gameOver) {
+    endGame(null, "サーバーとの接続が切れました。");
+  } else if (!screens.gameOver.classList.contains("active")) {
+    returnToMenu("サーバーとの接続が切れました。");
+  }
+}
+
+function handleServerMessage(msg) {
+  switch (msg.type) {
+    case "queued":
+      waitingTextEl.textContent = "対戦相手を探しています…";
+      break;
+    case "room_created":
+      waitingTextEl.textContent =
+        `ルームコード: ${msg.code}\nこのコードを相手に伝えて「ルームに参加」してもらってください。\n（待機中…）`;
+      break;
+    case "room_error":
+      showScreen("joinRoom");
+      joinRoomNoteEl.textContent = msg.message || "参加に失敗しました。";
+      if (ws) { ws.close(); ws = null; }
+      break;
+    case "matched":
+      onlineSide = msg.side;
+      matchCategory = msg.category === "prop" ? "prop" : "jet"; // 部屋作成者/ランダムマッチのキューが決めたカテゴリをサーバーから受け取る
+      myAircraftChoice = null;
+      opponentAircraftChoice = null;
+      showAircraftSelect("対戦相手が見つかりました！機体を選んでください。");
+      break;
+    case "opponent_selected":
+      opponentAircraftChoice = msg.aircraft;
+      if (mode === "online") {
+        const note = `対戦相手: ${AIRCRAFT_DB[msg.aircraft].label}`;
+        selectNoteEl.textContent = note;
+        if (myAircraftChoice) selectStatusEl.textContent = "対戦相手の準備を待っています…";
+      }
+      break;
+    case "start":
+      startOnlineMatch();
+      break;
+    case "state":
+      onRemoteState(msg.data);
+      break;
+    case "opponent_died":
+      if (mode === "online" && running && !gameOver) endGame(true);
+      break;
+    case "rematch_ready":
+      myAircraftChoice = null;
+      opponentAircraftChoice = null;
+      remoteState = null;
+      showAircraftSelect("同じ相手ともう一度！機体を選んでください。");
+      break;
+    case "opponent_left":
+      if (mode === "online") {
+        if (ws) { ws.close(); ws = null; }
+        if (running && !gameOver) {
+          endGame(null, "相手が退出しました。");
+        } else if (screens.gameOver.classList.contains("active")) {
+          // 撃墜後、再戦を待っている間に相手が退出した場合
+          btnPrimaryEl.disabled = true;
+          btnPrimaryEl.textContent = "対戦相手が退出しました";
+          msgBody.textContent += "（相手が退出したため再戦はできません）";
+        } else {
+          returnToMenu("相手が退出しました。");
+        }
+      }
+      break;
+  }
+}
+
+// --- 14-5. 敵機の状態をネットワークから受信・送信する ---
+function onRemoteState(data) {
+  if (!remoteState) {
+    remoteState = {
+      position: new THREE.Vector3().fromArray(data.p),
+      quat: new THREE.Quaternion().fromArray(data.q),
+      velocity: new THREE.Vector3().fromArray(data.v),
+      throttle: data.thr, airbrake: data.ab, alive: data.alive, hud: data.hud || {},
+    };
+  } else {
+    remoteState.position.fromArray(data.p);
+    remoteState.quat.fromArray(data.q);
+    remoteState.velocity.fromArray(data.v);
+    remoteState.throttle = data.thr;
+    remoteState.airbrake = data.ab;
+    remoteState.alive = data.alive;
+    remoteState.hud = data.hud || {};
+  }
+}
+
+// 受信した相手機の状態へ滑らかに補間する（送信レート20Hzのカクつきを補うため）。
+// 姿勢・位置さえ合っていれば、既存の弾道シミュレーション（12章）はそのまま使い回せる。
+function applyRemoteState(state, dt) {
+  if (!remoteState) return; // まだ相手の状態を受信していない（マッチ直後の一瞬だけ）
+  const rate = 1 - Math.exp(-dt * 12);
+  state.position.lerp(remoteState.position, rate);
+  state.quat.slerp(remoteState.quat, rate);
+  state.velocity.lerp(remoteState.velocity, rate);
+  state.throttle = remoteState.throttle;
+  state.airbrake = remoteState.airbrake;
+  state.alive = remoteState.alive;
+
+  state.mesh.position.copy(state.position);
+  state.mesh.quaternion.copy(state.quat);
+
+  state.hud.alpha = remoteState.hud.alpha || 0;
+  state.hud.gforce = remoteState.hud.gforce || 0;
+  state.hud.turnRate = remoteState.hud.turnRate || 0;
+  state.hud.stall = !!remoteState.hud.stall;
+  state.hud.speed = state.velocity.length();
+  state.hud.forwardSpeed = state.hud.speed;
+}
+
+function sendPlayerState() {
+  sendNet({
+    type: "state",
+    data: {
+      p: player.position.toArray(),
+      q: player.quat.toArray(),
+      v: player.velocity.toArray(),
+      thr: player.throttle,
+      ab: player.airbrake,
+      alive: player.alive,
+      hud: {
+        alpha: player.hud.alpha,
+        gforce: player.hud.gforce,
+        turnRate: player.hud.turnRate,
+        stall: !!player.hud.stall,
+      },
+    },
+  });
+}
+
+// --- 14-6. メニュー操作 ---
+document.getElementById("btnVsAI").addEventListener("click", () => {
+  mode = "ai";
+  showCategorySelect();
+});
+
+document.getElementById("btnRandomMatch").addEventListener("click", () => {
+  mode = "online";
+  pendingOnlineAction = "random";
+  showCategorySelect();
+});
+
+document.getElementById("btnCreateRoom").addEventListener("click", () => {
+  mode = "online";
+  pendingOnlineAction = "create";
+  showCategorySelect();
+});
+
+document.getElementById("btnJoinRoomShow").addEventListener("click", () => {
+  joinRoomNoteEl.textContent = "";
+  roomCodeInputEl.value = "";
+  showScreen("joinRoom");
+});
+
+document.getElementById("btnJoinRoomBack").addEventListener("click", () => {
+  showScreen("menu");
+});
+
+document.getElementById("btnJoinRoomGo").addEventListener("click", () => {
+  const code = roomCodeInputEl.value.trim().toUpperCase();
+  if (!code) return;
+  mode = "online";
+  waitingTextEl.textContent = "接続しています…";
+  showScreen("waiting");
+  connectWS({ type: "join_room", code }).catch((e) => {
+    mode = null;
+    joinRoomNoteEl.textContent = "接続に失敗しました: " + e.message;
+    showScreen("joinRoom");
+  });
+});
+
+document.getElementById("btnWaitCancel").addEventListener("click", () => {
+  returnToMenu();
+});
+
+document.getElementById("btnSelectBack").addEventListener("click", () => {
+  if (mode === "ai" && aiStage === "enemy") {
+    // 敵機選択中の「戻る」は自機選択に戻るだけ（メニューには出ない）
+    startAircraftSelectForPlayer();
+    return;
+  }
+  if (mode === "ai" && aiStage === "player") {
+    // 自機選択中の「戻る」はカテゴリ選択に戻る
+    showCategorySelect();
+    return;
+  }
+  returnToMenu();
+});
+
+
+// ================================================================
+// 15. フィードバック送信
+// ================================================================
+// 中継サーバー（server.js）にPOST /feedbackという軽量なエンドポイントを用意しており、
+// ここから送るとサーバー側のfeedback.logに追記される。サーバーに繋がらない/起動していない
+// 場合でも内容を失わないよう、常にlocalStorageにも保存しておく。
+const feedbackBtnEl = document.getElementById("feedbackBtn");
+const feedbackPanelEl = document.getElementById("feedbackPanel");
+const feedbackTextEl = document.getElementById("feedbackText");
+const feedbackStatusEl = document.getElementById("feedbackStatus");
+const feedbackSendEl = document.getElementById("feedbackSend");
+
+function clearHeldKeys() {
+  for (const k in keys) keys[k] = false;
+}
+
+function saveFeedbackLocally(entry) {
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem("dogfightFeedback") || "[]"); } catch {}
+  list.push(entry);
+  try { localStorage.setItem("dogfightFeedback", JSON.stringify(list.slice(-200))); } catch {}
+}
+
+feedbackBtnEl.addEventListener("click", () => {
+  clearHeldKeys(); // 開いた瞬間に押しっぱなしの操縦入力が残らないようにする
+  feedbackStatusEl.textContent = "";
+  feedbackPanelEl.classList.add("active");
+  feedbackTextEl.focus();
+});
+
+const feedbackCloseHandler = () => {
+  feedbackPanelEl.classList.remove("active");
+};
+document.getElementById("feedbackClose").addEventListener("click", feedbackCloseHandler);
+feedbackTextEl.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") feedbackCloseHandler();
+});
+
+feedbackSendEl.addEventListener("click", () => {
+  const message = feedbackTextEl.value.trim();
+  if (!message) return;
+
+  const entry = {
+    message,
+    time: new Date().toISOString(),
+    mode,
+    playerAircraft: player && player.params ? player.params.label : null,
+    enemyAircraft: enemy && enemy.params ? enemy.params.label : null,
+  };
+  saveFeedbackLocally(entry);
+
+  feedbackSendEl.disabled = true;
+  feedbackStatusEl.textContent = "送信しています…";
+
+  const feedbackUrl = getServerUrl().replace(/^ws/, "http") + "/feedback";
+  fetch(feedbackUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(entry),
+  }).then((res) => {
+    feedbackSendEl.disabled = false;
+    if (res.ok) {
+      feedbackStatusEl.textContent = "送信しました。ありがとうございます！";
+      feedbackTextEl.value = "";
+    } else {
+      feedbackStatusEl.textContent = "サーバーへの送信に失敗しました（ローカルには保存済みです）。";
+    }
+  }).catch(() => {
+    feedbackSendEl.disabled = false;
+    feedbackStatusEl.textContent = "サーバーに接続できませんでした（ローカルには保存済みです）。";
+  });
+});
+
+// デバッグ用に window に公開（自動テスト用）
+window.__debug = { player, enemy, stepPhysics, AIRCRAFT_DB };
+</script>
+
+</body>
+</html>
