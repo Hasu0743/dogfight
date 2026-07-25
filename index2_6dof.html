@@ -2147,8 +2147,14 @@ const STATE_SEND_INTERVAL = 1 / 20;  // 状態送信は20Hzで十分（毎フレ
 
 const serverUrlInputEl = document.getElementById("serverUrlInput");
 
+const PUBLIC_RELAY_URL = "wss://dogfight.chickenrace.info";
+
 function defaultServerUrl() {
-  if (location.protocol === "http:" || location.protocol === "https:") {
+  if (location.protocol === "https:") {
+    // HTTPSページからは wss:// でないと「insecure WebSocket」でブロックされる
+    return PUBLIC_RELAY_URL;
+  }
+  if (location.protocol === "http:") {
     return `ws://${location.hostname}:8080`;
   }
   return "ws://localhost:8080"; // file:// で直接開いている場合の既定値
@@ -2156,7 +2162,12 @@ function defaultServerUrl() {
 serverUrlInputEl.value = defaultServerUrl();
 
 function getServerUrl() {
-  return (serverUrlInputEl.value || "").trim() || defaultServerUrl();
+  let url = (serverUrlInputEl.value || "").trim() || defaultServerUrl();
+  if (location.protocol === "https:" && url.startsWith("ws://")) {
+    // HTTPSページで ws:// を手入力しても弾かれるだけなので wss:// に補正する
+    url = "wss://" + url.slice("ws://".length);
+  }
+  return url;
 }
 
 function connectWS(initialMessage) {
