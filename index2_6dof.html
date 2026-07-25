@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <title>航空格闘戦 F-16 vs Su-27</title>
+<!-- Google AdSense -->
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4396449683541795"
+     crossorigin="anonymous"></script>
 <style>
   /* ============================================================
      0. 基本リセット
@@ -137,6 +140,24 @@
   .menuBtn.secondary { background: #3a4750; color: #eafff0; }
   .menuBtn:disabled { opacity: 0.6; cursor: default; }
   .menuNote { color: #ffd166; font-size: 13px; min-height: 1.4em; white-space: pre-line; }
+
+  /* メニュー画面限定のサイド広告（HUDパネルと被らないよう上下にマージンを確保） */
+  .sideAd {
+    position: fixed; top: 380px; bottom: 80px; width: 160px;
+    display: none; align-items: center; justify-content: center;
+    overflow: hidden; z-index: 50; pointer-events: auto;
+  }
+  .sideAd.visible { display: flex; }
+  #adSlotLeft { left: 12px; }
+  #adSlotRight { right: 12px; }
+  .sideAd ins.adsbygoogle { width: 100%; }
+  @media (max-width: 900px) { .sideAd { display: none !important; } }
+  /* TODO: 広告ユニット作成後（data-ad-slot設定後）はこのプレースホルダー表示を削除 */
+  .sideAd.placeholder { border: 1px dashed #6a8; background: rgba(255,255,255,0.04); }
+  .sideAd.placeholder::after {
+    content: "広告\A (準備中)"; white-space: pre; text-align: center;
+    color: #6a8; font-size: 12px; letter-spacing: 1px;
+  }
 
   /* ============================================================
      7. オンライン対戦・機体選択 UI
@@ -274,6 +295,22 @@
       <div class="dot"></div>
     </div>
     <div id="adiLabel">ATTITUDE</div>
+  </div>
+
+  <!-- メニュー画面表示中のみ表示するサイド広告（showScreen/hideCenterMessageから制御） -->
+  <div class="sideAd placeholder" id="adSlotLeft">
+    <ins class="adsbygoogle"
+         style="display:block; width:160px; height:400px"
+         data-ad-client="ca-pub-4396449683541795"
+         data-ad-slot=""
+         data-ad-format="auto"></ins>
+  </div>
+  <div class="sideAd placeholder" id="adSlotRight">
+    <ins class="adsbygoogle"
+         style="display:block; width:160px; height:400px"
+         data-ad-client="ca-pub-4396449683541795"
+         data-ad-slot=""
+         data-ad-format="auto"></ins>
   </div>
 
   <div id="center-message">
@@ -1948,10 +1985,28 @@ function showScreen(name) {
   Object.values(screens).forEach((el) => el.classList.remove("active"));
   screens[name].classList.add("active");
   centerMsg.style.display = "block";
+  setSideAdsVisible(name === "menu");
 }
 function hideCenterMessage() {
   centerMsg.style.display = "none";
+  setSideAdsVisible(false);
 }
+
+// --- 14-1b. サイド広告（トップメニュー画面のときだけ表示） ---
+const adSlotLeftEl = document.getElementById("adSlotLeft");
+const adSlotRightEl = document.getElementById("adSlotRight");
+function setSideAdsVisible(visible) {
+  adSlotLeftEl.classList.toggle("visible", visible);
+  adSlotRightEl.classList.toggle("visible", visible);
+}
+function initSideAds() {
+  document.querySelectorAll("#adSlotLeft ins.adsbygoogle, #adSlotRight ins.adsbygoogle").forEach((ins) => {
+    if (!ins.dataset.adSlot) return; // 広告ユニット作成後にdata-ad-slotを設定するまでは読み込まない
+    try { (window.adsbygoogle = window.adsbygoogle || []).push({}); } catch (e) {}
+  });
+}
+initSideAds();
+setSideAdsVisible(true); // 初期画面はトップメニューなので最初から表示
 
 // メニュー画面内の各種メッセージ欄（他のHUD要素と違い動的に生成されないので、ここで一括してconst化）
 const menuNoteEl = document.getElementById("menuNote");
