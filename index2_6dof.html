@@ -763,12 +763,22 @@ const SHIFT_CAM_DIST = 26; // Shiftモードでのカメラ距離（機体モデ
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const FALLBACK_UP = new THREE.Vector3(0, 0, 1);
 
-// --- 1-7. 描画定数（機体表示スケール／ガンライン描画） ---
+// --- 1-7. 描画定数（機体表示スケール／曳光弾描画） ---
 const VISUAL_SCALE = 2.0; // 見やすさのための表示上の拡大（当たり判定など物理には影響しない）
-const GUN_LINE_SEGMENTS = 40;
-const GUN_LINE_RADIUS = 0.6;
-const GUN_LINE_AXIS = new THREE.Vector3(0, 1, 0);
 const ADI_PX_PER_DEG = 3.0;
+
+// 曳光弾（トレーサー）：以前は弾道を1本の太い線として描いていたためレーザーのように
+// 見えていたが、実際に1発ずつ弾を飛ばして「弾道を目で追える」表示に変更した。
+// 弾の運動は命中判定と同じ stepBullet（12章）で積分するので、見えている弾道と
+// 当たり判定に使われる弾道は必ず一致する。
+const TRACER_AXIS = new THREE.Vector3(0, 1, 0); // 円柱ジオメトリの長軸（速度方向へ向ける）
+const TRACER_INTERVAL = 0.05;            // s。曳光弾を1発描く間隔（実機も数発に1発だけ曳光弾なので、この密度で十分「線」に見える）
+const TRACER_LIFE = BULLET_SIM_MAXTIME;  // s。命中判定の弾道シミュレーション時間と揃える
+const TRACER_MAX = 200;                  // 同時に存在できる曳光弾の数（使い回すプールのサイズ）
+const TRACER_RADIUS = 0.45;              // m。視認性のための太さ
+const TRACER_STREAK = 0.02;              // 速度[m/s]あたりの見た目の伸び（高速で飛ぶ弾のブレを表現）
+const TRACER_MIN_LEN = 6;                // m。低速になっても最低限の長さは保つ
+const TRACER_FIRE_RANGE = GUN_RANGE * 2; // m。相手がこれより遠い時は撃たない（無意味な曳光弾で画面を汚さない）
 
 // --- 1-8. 推力パワーカーブ定数：常に最大推力が出るのは不自然なため、対気速度に応じて
 //     エンジン出力に倍率をかける（低速域0.8× → 中速域800km/h前後で1.0× → 高速域1,000km/h以降で1.2×） ---
@@ -919,48 +929,67 @@ const enemyMarkerSprite = new THREE.Sprite(new THREE.SpriteMaterial({
 enemyMarkerSprite.renderOrder = 999;
 scene.add(enemyMarkerSprite);
 
-// --- 4-2. 射線表示：M61バルカン相当の弾道（初速・重力落下・空気抵抗による減速）を
-//     シミュレートした実際の弾道カーブを3D空間に描画する。
-//     細い線(Line)はWebGLだとほぼ1pxでしか描かれず見えづらいため、
-//     実際に太さを持つ円柱セグメントを鎖状につないで曲線を表現する。 ---
-const gunLineMat = new THREE.MeshBasicMaterial({
-  color: 0x33ff66, transparent: true, opacity: 0.45, depthWrite: false, fog: false,
+// --- 4-2. 曳光弾（トレーサー）：以前の「弾道カーブを1本の線として描く」方式は、
+//     実質レーザーのように見えて弾速や着弾の遅れが伝わらなかったため、実際に1発ずつ
+//     弾を飛ばして描く方式に変更した。弾の運動は命中判定と同一の stepBullet（12章）で
+//     積分するので、画面に見えている弾道はそのまま当たり判定に使われている弾道と一致する。
+//     細い線(Line)はWebGLだとほぼ1pxで描かれ視認しづらいので、太さを持つ円柱を
+//     速度方向へ伸ばし「高速で飛ぶ弾のブレ」として描く（自機＝淡黄／敵機＝橙）。 ---
+const tracerGeo = new THREE.CylinderGeometry(TRACER_RADIUS, TRACER_RADIUS, 1, 5, 1, true);
+const tracerMatOwn = new THREE.MeshBasicMaterial({
+  color: 0xfff0a0, transparent: true, opacity: 0.95, depthWrite: false, fog: false,
 });
-const gunLineUnitGeo = new THREE.CylinderGeometry(GUN_LINE_RADIUS, GUN_LINE_RADIUS, 1, 5, 1, true);
-const gunLineSegments = [];
-for (let i = 0; i < GUN_LINE_SEGMENTS; i++) {
-  const seg = new THREE.Mesh(gunLineUnitGeo, gunLineMat);
-  seg.visible = false;
-  scene.add(seg);
-  gunLineSegments.push(seg);
+const tracerMatFoe = new THREE.MeshBasicMaterial({
+  color: 0xff5a2b, transparent: true, opacity: 0.95, depthWrite: false, fog: false,
+});
+
+// 弾はひたすら撃ち続けるため、毎回オブジェクトを作らずプールを順番に使い回す
+const tracers = [];
+for (let i = 0; i < TRACER_MAX; i++) {
+  const mesh = new THREE.Mesh(tracerGeo, tracerMatOwn);
+  mesh.visible = false;
+  scene.add(mesh);
+  tracers.push({ mesh, pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0 });
+}
+let tracerCursor = 0;
+
+function spawnTracer(shooter, isOwn) {
+  const t = tracers[tracerCursor];
+  tracerCursor = (tracerCursor + 1) % TRACER_MAX;
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(shooter.quat);
+  // 機首の少し前から発射する（機体モデルの内側から生えて見えないように）
+  t.pos.copy(shooter.position).addScaledVector(forward, shooter.params.fuselageLen * VISUAL_SCALE * 0.6);
+  // 初速 = 機体の速度 + 銃口初速（＝命中判定で飛ばしている弾とまったく同じ条件）
+  t.vel.copy(shooter.velocity).addScaledVector(forward, BULLET_MUZZLE_V);
+  t.life = TRACER_LIFE;
+  t.mesh.material = isOwn ? tracerMatOwn : tracerMatFoe;
+  t.mesh.visible = true;
 }
 
-function updateGunLine(hasSolution, points) {
-  const availablePts = Math.min(points.length, GUN_LINE_SEGMENTS + 1);
-  const segCount = Math.max(0, availablePts - 1);
+function updateTracers(dt) {
+  for (const t of tracers) {
+    if (t.life <= 0) continue;
+    stepBullet(t.pos, t.vel, dt);
+    t.life -= dt;
+    if (t.life <= 0) { t.mesh.visible = false; continue; }
 
-  for (let i = 0; i < GUN_LINE_SEGMENTS; i++) {
-    if (i >= segCount) {
-      gunLineSegments[i].visible = false;
-      continue;
-    }
-    const p0 = points[i];
-    const p1 = points[i + 1];
-    const dir = p1.clone().sub(p0);
-    const len = dir.length();
-    if (len < 1e-4) {
-      gunLineSegments[i].visible = false;
-      continue;
-    }
-    const seg = gunLineSegments[i];
-    seg.visible = true;
-    seg.position.copy(p0).addScaledVector(dir, 0.5);
-    seg.quaternion.setFromUnitVectors(GUN_LINE_AXIS, dir.clone().normalize());
-    seg.scale.set(1, len, 1);
+    const speed = t.vel.length();
+    if (speed < 1e-3) continue;
+    const dir = t.vel.clone().divideScalar(speed);
+    const len = Math.max(TRACER_MIN_LEN, speed * TRACER_STREAK);
+    // 弾の現在位置を先端にして、後ろへ伸びる形で描く
+    t.mesh.position.copy(t.pos).addScaledVector(dir, -len * 0.5);
+    t.mesh.quaternion.setFromUnitVectors(TRACER_AXIS, dir);
+    t.mesh.scale.set(1, len, 1);
   }
+}
 
-  gunLineMat.color.set(hasSolution ? 0x39ff6a : 0x2ecc71);
-  gunLineMat.opacity = hasSolution ? 0.85 : 0.45;
+// 対戦の開始・リセット時に、前の対戦で飛んでいた弾を消す
+function clearTracers() {
+  for (const t of tracers) {
+    t.life = 0;
+    t.mesh.visible = false;
+  }
 }
 
 
@@ -1569,6 +1598,9 @@ function resetGame(playerType, enemyType, side) {
   enemy.underFireMeter = 0;
   gameOver = false;
   camInit = false;
+  clearTracers(); // 前の対戦で飛んでいた弾を持ち込まない
+  tracerAccumPlayer = 0;
+  tracerAccumEnemy = 0;
 
   enemyPanelLabelEl.textContent = `ENEMY (${enemy.params.label})`;
   matchupLabelEl.textContent = `自機: ${player.params.label} ／ 敵機: ${enemy.params.label}`;
@@ -1740,7 +1772,20 @@ function updateADI() {
 // 12. 弾道シミュレーション・命中判定
 // ================================================================
 
-// --- 12-1. 弾道シミュレーション：M61バルカン相当の特性（初速・重力落下・空気抵抗による減速）
+// --- 12-1. 弾1発の運動を1ステップ進める（重力による落下＋速度の2乗に比例する空気抵抗）。
+//     命中判定の弾道シミュレーション（12-2）と、画面に描く曳光弾（4-2 updateTracers）が
+//     この同じ関数を使うので、「見えている弾道」と「当たる弾道」が食い違うことはない。 ---
+function stepBullet(pos, vel, dt) {
+  const speed = vel.length();
+  if (speed > 1) {
+    const dragDecel = BULLET_DRAG_K * speed * speed;
+    vel.addScaledVector(vel.clone().normalize(), -dragDecel * dt);
+  }
+  vel.y -= G * dt;
+  pos.addScaledVector(vel, dt);
+}
+
+// --- 12-2. 弾道シミュレーション：M61バルカン相当の特性（初速・重力落下・空気抵抗による減速）
 //     で仮想的な弾を飛ばし、実際に相手に当たるかどうかを判定する。
 //     弾速は無限ではないため、相手が動いていればリード（先読み）していない射撃は外れる。 ---
 function simulateGunTrajectory(attacker, target) {
@@ -1750,37 +1795,28 @@ function simulateGunTrajectory(attacker, target) {
   const targetPos = target.position.clone();
   const targetVel = target.velocity.clone(); // 弾の飛行中は等速直線運動と仮定（簡略化）
 
-  const points = [bulletPos.clone()];
   let closestDist = bulletPos.distanceTo(targetPos);
 
   for (let t = BULLET_SIM_DT; t <= BULLET_SIM_MAXTIME; t += BULLET_SIM_DT) {
-    const speed = bulletVel.length();
-    if (speed > 1) {
-      const dragDecel = BULLET_DRAG_K * speed * speed;
-      bulletVel.addScaledVector(bulletVel.clone().normalize(), -dragDecel * BULLET_SIM_DT);
-    }
-    bulletVel.y -= G * BULLET_SIM_DT;
-    bulletPos.addScaledVector(bulletVel, BULLET_SIM_DT);
+    stepBullet(bulletPos, bulletVel, BULLET_SIM_DT);
     targetPos.addScaledVector(targetVel, BULLET_SIM_DT);
-
-    points.push(bulletPos.clone());
 
     const d = bulletPos.distanceTo(targetPos);
     if (d < closestDist) closestDist = d;
     if (bulletPos.distanceTo(attacker.position) > GUN_RANGE * 1.6) break;
   }
 
-  return { points, closestDist };
+  return { closestDist };
 }
 
-// --- 12-2. ガン照準・撃墜判定：実際の弾道が命中半径内を通過した瞬間に即時撃墜する ---
+// --- 12-3. ガン照準・撃墜判定：実際の弾道が命中半径内を通過した瞬間に即時撃墜する ---
 function updateGunSolution(attacker, target, dt) {
   const dist = attacker.position.distanceTo(target.position);
-  const { points, closestDist } = simulateGunTrajectory(attacker, target);
+  const { closestDist } = simulateGunTrajectory(attacker, target);
 
   const inCone = dist > GUN_MIN_RANGE && dist < GUN_RANGE && closestDist < BULLET_HIT_RADIUS;
   target.underFireMeter = inCone ? 1 : 0; // 即時撃墜。段階的な蓄積はしない
-  return { inCone, points };
+  return { inCone };
 }
 
 
@@ -1791,8 +1827,9 @@ let mode = null;        // "ai" | "online"（メニューにいる間は null）
 let running = false;
 let gameOver = false;
 let lastTime = performance.now();
-let lastEnemyInGuns = false;
-let lastGunPoints = [];
+// 曳光弾を撒く間隔を計るタイマー（自機・敵機それぞれ独立）
+let tracerAccumPlayer = 0;
+let tracerAccumEnemy = 0;
 
 function animate() {
   const now = performance.now();
@@ -1818,10 +1855,25 @@ function animate() {
 
     const playerInGunsResult = updateGunSolution(enemy, player, dt);
     const enemyInGunsResult = updateGunSolution(player, enemy, dt);
-    lastEnemyInGuns = enemyInGunsResult.inCone;
-    lastGunPoints = enemyInGunsResult.points;
 
     gunsFlashEl.style.opacity = enemyInGunsResult.inCone ? 1 : 0;
+
+    // 曳光弾を撒く：どちらの機体も相手が射程圏内にいる間は撃ち続ける
+    // （ガンの命中判定自体も「射線に入り続けたら当たる」常時発射モデルなので、それを可視化している）。
+    // 遠すぎる時に撃たないのは、当たる見込みのない曳光弾で画面が埋まるのを避けるため。
+    const gunDist = player.position.distanceTo(enemy.position);
+    if (gunDist < TRACER_FIRE_RANGE) {
+      tracerAccumPlayer += dt;
+      if (tracerAccumPlayer >= TRACER_INTERVAL) {
+        tracerAccumPlayer = 0;
+        if (player.alive) spawnTracer(player, true);
+      }
+      tracerAccumEnemy += dt;
+      if (tracerAccumEnemy >= TRACER_INTERVAL) {
+        tracerAccumEnemy = 0;
+        if (enemy.alive) spawnTracer(enemy, false);
+      }
+    }
 
     playerMeterFill.style.width = (player.underFireMeter * 100) + "%";
     enemyMeterFill.style.width = (enemy.underFireMeter * 100) + "%";
@@ -1865,7 +1917,8 @@ function animate() {
   updateCamera(dt);
   updateEnemyIndicator();
   updateADI();
-  updateGunLine(lastEnemyInGuns, lastGunPoints);
+  // 撃墜後・メニュー中も、既に飛んでいる弾は飛び続ける（自分を撃った弾の行方が見える）
+  updateTracers(dt);
   renderer.render(scene, camera);
 }
 
