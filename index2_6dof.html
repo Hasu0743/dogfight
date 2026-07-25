@@ -68,41 +68,6 @@
   }
 
   /* ============================================================
-     3-b. マウスエイム：照準環（マウスで動かす狙点）と
-          ボアサイト（実際に機首が向いている方向）
-     ============================================================ */
-  #aimReticle {
-    position: absolute; width: 42px; height: 42px; margin: -21px 0 0 -21px;
-    border: 2px solid rgba(255, 240, 160, 0.9); border-radius: 50%;
-    box-shadow: 0 0 6px rgba(0,0,0,0.8), inset 0 0 4px rgba(0,0,0,0.5);
-    display: none; pointer-events: none;
-  }
-  #aimReticle::after {
-    content: ""; position: absolute; top: 50%; left: 50%;
-    width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px;
-    background: rgba(255, 240, 160, 0.95); border-radius: 50%;
-  }
-  /* ボアサイト＝機首の実際の向き。照準環を追いかける様子が見えるので、
-     どれだけ機体が付いてきていないか（＝機動限界）が分かる */
-  #boresight {
-    position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px;
-    display: none; pointer-events: none;
-  }
-  #boresight::before, #boresight::after {
-    content: ""; position: absolute; background: rgba(120, 255, 170, 0.85);
-    box-shadow: 0 0 4px rgba(0,0,0,0.8);
-  }
-  #boresight::before { left: 50%; top: 0; width: 2px; height: 100%; margin-left: -1px; }
-  #boresight::after { top: 50%; left: 0; height: 2px; width: 100%; margin-top: -1px; }
-
-  #mouseAimHint {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, 26px);
-    color: #dff5e6; font-size: 14px; letter-spacing: 1px;
-    background: rgba(0,0,0,0.45); padding: 6px 12px; border-radius: 6px;
-    display: none; pointer-events: none;
-  }
-
-  /* ============================================================
      4. 敵機位置インジケーター（画面内マーカー/画面外矢印）
      ============================================================ */
   #enemyIndicator {
@@ -284,14 +249,11 @@
 
   <div class="panel" id="bottomleft">
     <span id="matchupLabel"></span><br>
-    マウス 照準（クリックで開始／Escで解除） ・ W/S ピッチ ・ A/D ロール ・ Q/E ヨー ・ R/F スロットル ・ Space エアブレーキ ・ Shift 敵機を見る
+    W/S ピッチ ・ A/D ロール ・ Q/E ヨー ・ R/F スロットル ・ Space エアブレーキ ・ Shift 敵機を見る
   </div>
 
   <div id="gunsFlash">GUNS!</div>
   <div id="stallWarn">STALL</div>
-  <div id="aimReticle"></div>
-  <div id="boresight"></div>
-  <div id="mouseAimHint">クリックでマウスエイム開始（Escで解除）</div>
   <div id="flapsWarn">COMBAT FLAPS</div>
 
   <div id="enemyIndicator">
@@ -825,20 +787,6 @@ const THRUST_PWR_MID = 0.9;                 // 中速域（800 km/h前後）で�
 const THRUST_PWR_HIGH = 1.0;                // 高速域（1,000 km/h以降）でのパワー係数
 const THRUST_PWR_MID_SPEED = 800 / 3.6;     // m/s（800 km/h）
 const THRUST_PWR_HIGH_SPEED = 1000 / 3.6;   // m/s（1,000 km/h）
-
-// --- 1-9. マウスエイム定数：マウスで「空間上の狙点（照準環）」を動かし、機体が自動で
-//     そこへ機首を向けにいく方式（War Thunderのマウスエイムと同じ考え方）。
-//     機首を向ける制御そのものは敵AIの追尾ロジックと同一の式を使う（8章と揃えている）ので、
-//     ロールで機体をバンクさせてから引き起こす＝協調旋回が自然に出る。 ---
-const MOUSE_SENS = 0.0022;          // rad/px。マウス移動量から照準の回転量への変換係数
-const AIM_MAX_CONE = 45 * DEG;      // rad。照準環を機首から離せる最大角（これ以上引っ張っても円錐の縁で止まる）
-const AIM_RESYNC_RATE = 12;         // 1/s。キーボード操舵に切り替えた時、照準を機首方向へ引き戻す速さ
-const AIM_MARKER_DIST = 500;        // m。照準環・ボアサイトを画面に投影するための仮想距離
-// 翼を水平へ戻す補正：これが無いと、照準を止めていても機体がじわじわ傾いて緩い螺旋に入る
-// （制御則が「機首の向き」しか見ておらず、バンク角そのものを見ていないため）。
-// 横方向へ狙っている間は旋回のためのバンクを妨げないよう、補正を弱める。
-const AIM_LEVEL_GAIN = 0.9;             // バンク角に対する水平復帰の強さ
-const AIM_LEVEL_YAW_LIMIT = 12 * DEG;   // これ以上横に狙っている時は水平復帰を切る（旋回優先）
 
 
 // ================================================================
@@ -1455,157 +1403,15 @@ function isTypingInField() {
 window.addEventListener("keydown", (e) => { if (!isTypingInField()) keys[e.key.toLowerCase()] = true; });
 window.addEventListener("keyup", (e) => { if (!isTypingInField()) keys[e.key.toLowerCase()] = false; });
 
-// --- 7-2. マウスエイム ---
-// マウスは「空間上の狙点（照準環）」を動かし、機体はそこへ機首を向けようと自動で舵を打つ。
-// 照準はワールド座標の方向として保持するのが要点：機体座標で持つと機体が追いついても
-// 誤差が消えず「回り続ける（＝ただのレート指令）」ことになり、エイムにならない。
-// ワールドで持てば機首が狙点に到達したところで自然に収束する。
-const aimDirWorld = new THREE.Vector3(0, 0, -1);
-let mouseAimActive = false;   // ポインタロック中だけマウスエイムが効く（キーボードのみでも従来通り遊べる）
-let pendingMouseDx = 0;
-let pendingMouseDy = 0;
-
-const aimReticleEl = document.getElementById("aimReticle");
-const boresightEl = document.getElementById("boresight");
-const mouseAimHintEl = document.getElementById("mouseAimHint");
-
-// 画面クリックでマウスを捕捉。飛行中だけ。メニュー中はボタンを押せるように捕捉しない。
-renderer.domElement.addEventListener("click", () => {
-  if (running && !gameOver && !document.pointerLockElement) {
-    renderer.domElement.requestPointerLock?.();
-  }
-});
-document.addEventListener("pointerlockchange", () => {
-  mouseAimActive = document.pointerLockElement === renderer.domElement;
-  if (mouseAimActive) {
-    // 捕捉した瞬間は機首方向を狙っている状態から始める（いきなり機体が振られないように）
-    aimDirWorld.set(0, 0, -1).applyQuaternion(player.quat);
-    pendingMouseDx = 0;
-    pendingMouseDy = 0;
-  }
-});
-document.addEventListener("mousemove", (e) => {
-  if (!mouseAimActive) return;
-  pendingMouseDx += e.movementX || 0;
-  pendingMouseDy += e.movementY || 0;
-});
-function releaseMouseAim() {
-  if (document.pointerLockElement) document.exitPointerLock?.();
-}
-
-// マウス移動を照準方向へ反映し、機首から離れすぎないよう円錐内に収める
-function updateAim(dt) {
-  const nose = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quat);
-
-  if (!mouseAimActive) {
-    aimDirWorld.copy(nose); // 未使用時は機首に貼り付けておく（再開時に飛ばない）
-    return;
-  }
-
-  // 画面に対して素直に動くよう、カメラの右/上軸まわりに照準を回す
-  if (pendingMouseDx || pendingMouseDy) {
-    const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
-    aimDirWorld.applyAxisAngle(camUp, -pendingMouseDx * MOUSE_SENS);
-    aimDirWorld.applyAxisAngle(camRight, -pendingMouseDy * MOUSE_SENS);
-    aimDirWorld.normalize();
-    pendingMouseDx = 0;
-    pendingMouseDy = 0;
-  }
-
-  // キーボードで操縦している間は「手動で引き継いだ」とみなし、照準を機首へ寄せていく。
-  // こうしないと固定された狙点とキーボード入力が互いに打ち消し合ってしまう。
-  if (isManualSteering()) {
-    aimDirWorld.lerp(nose, 1 - Math.exp(-dt * AIM_RESYNC_RATE)).normalize();
-  }
-
-  // 円錐制限：機首から AIM_MAX_CONE 以上離れたら、同じ平面上で縁に留める
-  const cosAng = THREE.MathUtils.clamp(aimDirWorld.dot(nose), -1, 1);
-  if (cosAng < Math.cos(AIM_MAX_CONE)) {
-    const axis = new THREE.Vector3().crossVectors(nose, aimDirWorld);
-    if (axis.lengthSq() < 1e-9) aimDirWorld.copy(nose);
-    else aimDirWorld.copy(nose).applyAxisAngle(axis.normalize(), AIM_MAX_CONE);
-  }
-}
-
-function isManualSteering() {
-  return !!(keys["w"] || keys["s"] || keys["a"] || keys["d"] || keys["q"] || keys["e"]);
-}
-
-// 照準方向へ機首を向けるための舵を求める。式は敵AIの追尾（8章）とまったく同じ：
-// 狙点の方向を機体座標へ変換し、横のズレ(yawErr)はロールで機体をバンクさせ、
-// 縦のズレ(pitchErr)は昇降舵で引き起こす＝協調旋回になる。角速度でダンピングし、
-// 迎角が上限へ近づいたら引き起こしを弱めて失速に踏み込みすぎないようにする。
-function computeMouseAimControls() {
-  const p = player.params;
-  const localDir = aimDirWorld.clone().applyQuaternion(player.quat.clone().invert());
-  const forwardComp = Math.max(-localDir.z, 0.05);
-  const pitchErr = Math.atan2(localDir.y, forwardComp);
-  const yawErr = Math.atan2(localDir.x, forwardComp);
-
-  const distToEnemy = enemy ? player.position.distanceTo(enemy.position) : Infinity;
-  const extendedActive = computeExtendedActive(p, player.hud.speed, distToEnemy);
-  const alphaAbs = Math.abs(player.hud.alpha) * DEG; // hud.alphaは度なのでradへ
-  const marginRef = effectiveMaxAoA(p, extendedActive) * 0.9;
-  const alphaMarginFactor = THREE.MathUtils.clamp(1 - alphaAbs / marginRef, 0.25, 1);
-
-  const rollDamp = (player.angVel.p / p.rollRateMax) * 0.5;
-  const pitchDamp = (player.angVel.q / p.pitchRateMax) * 0.45;
-
-  let elevator = THREE.MathUtils.clamp(pitchErr * (extendedActive ? 5 : 2.4) - pitchDamp, -1, 1);
-  if (elevator > 0) elevator *= alphaMarginFactor;
-
-  // 翼を水平へ戻す補正。right.y は右翼の持ち上がり量＝バンク角のsinに相当し、
-  // 右へ傾いていれば負になるので、そのまま加えると左ロール（水平方向）へ効く。
-  const rightWing = new THREE.Vector3(1, 0, 0).applyQuaternion(player.quat);
-  const levelWeight = Math.max(0, 1 - Math.abs(yawErr) / AIM_LEVEL_YAW_LIMIT);
-  const levelTerm = AIM_LEVEL_GAIN * rightWing.y * levelWeight;
-
-  return {
-    elevator,
-    aileron: THREE.MathUtils.clamp(yawErr * 1.5 + rollDamp + levelTerm, -1, 1),
-    rudder: THREE.MathUtils.clamp(yawErr * 0.4, -1, 1),
-  };
-}
-
 function readPlayerControls() {
-  // キーボードの操舵は軸ごとにマウスエイムを上書きする
-  // （例：Aを押している間はロールだけ手動、ピッチはマウスのまま）
-  const kbElevator = (keys["s"] ? 1 : 0) - (keys["w"] ? 1 : 0);
-  const kbAileron = (keys["d"] ? 1 : 0) - (keys["a"] ? 1 : 0);
-  const kbRudder = (keys["e"] ? 1 : 0) - (keys["q"] ? 1 : 0);
-
-  const m = mouseAimActive ? computeMouseAimControls() : null;
-
   return {
-    elevator: kbElevator !== 0 || !m ? kbElevator : m.elevator,
-    aileron: kbAileron !== 0 || !m ? kbAileron : m.aileron,
-    rudder: kbRudder !== 0 || !m ? kbRudder : m.rudder,
+    elevator: (keys["s"] ? 1 : 0) - (keys["w"] ? 1 : 0),
+    aileron: (keys["d"] ? 1 : 0) - (keys["a"] ? 1 : 0),
+    rudder: (keys["e"] ? 1 : 0) - (keys["q"] ? 1 : 0),
     throttleUp: !!keys["r"],
     throttleDown: !!keys["f"],
     airbrake: !!keys[" "],
   };
-}
-
-// 照準環（狙点）とボアサイト（実際の機首方向）を画面へ投影して表示する
-function updateAimHud() {
-  const showAim = mouseAimActive && running && !gameOver;
-  mouseAimHintEl.style.display = (!mouseAimActive && running && !gameOver) ? "block" : "none";
-  aimReticleEl.style.display = showAim ? "block" : "none";
-  boresightEl.style.display = showAim ? "block" : "none";
-  if (!showAim) return;
-
-  camera.updateMatrixWorld(); // 投影に使う行列を最新にする（描画前に呼ばれるため）
-  const place = (el, dir) => {
-    const world = player.position.clone().addScaledVector(dir, AIM_MARKER_DIST);
-    const v = world.project(camera);
-    if (v.z > 1) { el.style.display = "none"; return; } // カメラの後ろ側なら隠す
-    el.style.display = "block";
-    el.style.left = ((v.x * 0.5 + 0.5) * window.innerWidth) + "px";
-    el.style.top = ((-v.y * 0.5 + 0.5) * window.innerHeight) + "px";
-  };
-  place(aimReticleEl, aimDirWorld);
-  place(boresightEl, new THREE.Vector3(0, 0, -1).applyQuaternion(player.quat));
 }
 
 
@@ -1817,18 +1623,12 @@ let camTransitionTimer = 0; // Shiftの押下/解放の直後だけ、切り替�
 
 function updateCamera(dt) {
   const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quat);
-  const shiftHeld = !!keys["shift"];
 
-  // 視点はマウス追従：マウスエイム中は「照準を向けている方向」を視線の基準にするので、
-  // マウスを振った先が画面に入る（狙いたい方向を見ながら飛べる）。
-  // ただしShiftが優先で、Shift中は下の分岐で「敵機を見る」カメラに切り替わる。
-  const viewDir = (mouseAimActive && !shiftHeld) ? aimDirWorld.clone() : forward.clone();
-
-  // ロール成分だけを除いた「視線の向き（ヨー・ピッチ）」を基準姿勢にする。
+  // ロール成分だけを除いた「機首の向き（ヨー・ピッチ）」を基準姿勢にする。
   // ほぼ真上/真下を向いたときのジンバルロックによる視点破綻を避けるため、
   // その場合は基準アップベクトルを切り替える。
-  const upRef = Math.abs(viewDir.dot(WORLD_UP)) > 0.97 ? FALLBACK_UP : WORLD_UP;
-  const lookMat = new THREE.Matrix4().lookAt(new THREE.Vector3(0, 0, 0), viewDir, upRef);
+  const upRef = Math.abs(forward.dot(WORLD_UP)) > 0.97 ? FALLBACK_UP : WORLD_UP;
+  const lookMat = new THREE.Matrix4().lookAt(new THREE.Vector3(0, 0, 0), forward, upRef);
   const rawRefQuat = new THREE.Quaternion().setFromRotationMatrix(lookMat);
   camRefQuat.slerp(rawRefQuat, camInit ? 1 - Math.exp(-dt * 4) : 1);
 
@@ -1838,6 +1638,7 @@ function updateCamera(dt) {
   const targetDistFactor = THREE.MathUtils.clamp(0.6 + 0.4 * speedRatio, 0.6, 1.2);
   camDistFactor += (targetDistFactor - camDistFactor) * (1 - Math.exp(-dt * 2.5));
 
+  const shiftHeld = !!keys["shift"];
   if (shiftHeld !== prevShiftHeld) {
     camTransitionTimer = 0.6; // 切り替わった直後の0.6秒間は高速レートで追従させる
     prevShiftHeld = shiftHeld;
@@ -1854,11 +1655,10 @@ function updateCamera(dt) {
     desiredCamPos = player.position.clone().addScaledVector(awayDir, SHIFT_CAM_DIST);
     desiredLookAt = enemy.position.clone();
   } else {
-    // 通常時：自機の姿勢を安定して映す追従カメラ。視線は自機の少し先（マウスエイム中は
-    // 照準方向の少し先）を見る。
+    // 通常時：自機の姿勢を安定して映す追従カメラ。視線は常に自機（少し先）を固定して見る。
     const offset = new THREE.Vector3(0, 4.5, 13).multiplyScalar(camDistFactor).applyQuaternion(camRefQuat);
     desiredCamPos = player.position.clone().add(offset);
-    desiredLookAt = player.position.clone().addScaledVector(viewDir, 6);
+    desiredLookAt = player.position.clone().addScaledVector(forward, 6);
   }
 
   if (!camInit) {
@@ -2038,7 +1838,6 @@ function animate() {
   dt = Math.min(dt, 0.05);
 
   if (running && !gameOver) {
-    updateAim(dt); // マウスの動きを照準方向へ反映してから、その照準に向けた舵を求める
     const pControls = readPlayerControls();
     stepPhysics(player, pControls, dt, enemy);
 
@@ -2120,7 +1919,6 @@ function animate() {
   updateADI();
   // 撃墜後・メニュー中も、既に飛んでいる弾は飛び続ける（自分を撃った弾の行方が見える）
   updateTracers(dt);
-  updateAimHud();
   renderer.render(scene, camera);
 }
 
@@ -2297,7 +2095,6 @@ const btnPrimaryEl = document.getElementById("btnPrimary");
 function endGame(playerWon, customMessage) {
   gameOver = true;
   running = false;
-  releaseMouseAim(); // マウス捕捉を解除して、リザルト画面のボタンを押せるようにする
   showScreen("gameOver");
 
   if (playerWon === null) {
@@ -2330,7 +2127,6 @@ function returnToMenu(note) {
   leaveOnlineMatch();
   mode = null;
   running = false;
-  releaseMouseAim();
   resetGame("F16", "SU27");
   showScreen("menu");
   menuNoteEl.textContent = note || "";
