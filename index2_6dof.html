@@ -419,6 +419,30 @@ function airDensityAt(altitude) {
   return RHO_SEA_LEVEL * Math.exp(-Math.max(altitude, 0) / ATMOSPHERE_SCALE_HEIGHT);
 }
 
+// 高度に応じた音速（国際標準大気の簡易近似）。対流圏(高度11,000mまで)は気温低下に伴い
+// 音速も直線的に低下し、それより上はほぼ一定とみなす。マッハ数の計算に使う。
+const TROPOPAUSE_ALT = 11000; // m
+function speedOfSoundAt(altitude) {
+  const h = Math.min(Math.max(altitude, 0), TROPOPAUSE_ALT);
+  return 340.3 - 0.0038 * h; // m/s（海面340.3 m/s → 高度11,000mで約298 m/s）
+}
+
+// 遷音速〜超音速域の造波抵抗（コンプレッシビリティ・ドラグ）。臨界マッハ数(machCrit)を
+// 超えると抵抗が急増し、マッハ1.05付近でピークを迎えたあと、超音速域では徐々に落ち着く
+// （ただし亜音速時より高い抵抗が残り続ける＝超音速巡航に燃料を食う、という実機の特性）。
+const WAVE_DRAG_PEAK_MACH = 1.05;
+const WAVE_DRAG_SUPERSONIC_FLOOR_RATIO = 0.45; // ピーク後、最終的に落ち着く先（peak比）
+function waveDragCD(mach, machCrit, peakCD) {
+  if (mach <= machCrit) return 0;
+  if (mach <= WAVE_DRAG_PEAK_MACH) {
+    const t = (mach - machCrit) / (WAVE_DRAG_PEAK_MACH - machCrit);
+    return peakCD * t * t; // ドラグダイバージェンス：2次関数的に立ち上がる
+  }
+  const floor = peakCD * WAVE_DRAG_SUPERSONIC_FLOOR_RATIO;
+  const decay = Math.exp(-(mach - WAVE_DRAG_PEAK_MACH) * 1.5);
+  return floor + (peakCD - floor) * decay;
+}
+
 // --- 1-2. 機体データベース（ここを変えるだけで挙動が変わる＝機体追加が容易になる設計） ---
 const AIRCRAFT_DB = {
   F16: {
@@ -432,6 +456,7 @@ const AIRCRAFT_DB = {
     extendedRange: 20 * DEG, // 失速後、揚力が0近くまで落ちる角度幅
     CD0: 0.020,
     k: 0.100,               // 誘導抗力係数
+    machCrit: 0.85, waveDragPeak: 0.045, // 臨界マッハ数・造波抵抗ピーク値
     maxThrust: 120000,       // N (アフターバーナー込み)
     rollRateMax: 300 * DEG,  // rad/s
     pitchRateMax: 35 * DEG,
@@ -457,6 +482,7 @@ const AIRCRAFT_DB = {
     extendedRange: 60 * DEG, // コブラ機動を再現：失速後も緩やかに揚力が残る
     CD0: 0.024,
     k: 0.114,
+    machCrit: 0.85, waveDragPeak: 0.050,
     maxThrust: 240000, // N（AL-31F アフターバーナー×2基相当）
     rollRateMax: 220 * DEG,
     pitchRateMax: 42 * DEG,   // 高い機首上げ能力（コブラ機動）
@@ -487,6 +513,7 @@ const AIRCRAFT_DB = {
     extendedRange: 16 * DEG,
     CD0: 0.018,             // 小型・低抵抗な機体
     k: 0.115,
+    machCrit: 0.90, waveDragPeak: 0.035, // 小型・低抵抗で遷音速域も比較的粘る
     maxThrust: 44000,       // N（J85-GE-21 ×2基 アフターバーナー合計。非力な軽戦闘機）
     rollRateMax: 320 * DEG, // 優れたロール率で知られる
     pitchRateMax: 34 * DEG,
@@ -507,6 +534,7 @@ const AIRCRAFT_DB = {
     extendedRange: 10 * DEG,
     CD0: 0.028,             // 大型・高抵抗
     k: 0.120,
+    machCrit: 0.86, waveDragPeak: 0.050,
     maxThrust: 150000,      // N（J79-GE-17 ×2基 アフターバーナー合計。強力だが重い）
     rollRateMax: 180 * DEG,
     pitchRateMax: 26 * DEG,
@@ -527,6 +555,7 @@ const AIRCRAFT_DB = {
     extendedRange: 14 * DEG,
     CD0: 0.026,             // デルタ翼は誘導抗力が大きい
     k: 0.135,
+    machCrit: 0.88, waveDragPeak: 0.040, // デルタ翼は遷音速域での抵抗増が比較的穏やか
     maxThrust: 97000,       // N（R-25 アフターバーナー。小型機体に強力な単発エンジン）
     rollRateMax: 240 * DEG,
     pitchRateMax: 30 * DEG,
@@ -547,6 +576,7 @@ const AIRCRAFT_DB = {
     extendedRange: 35 * DEG, // Su-27ほど極端ではないが、ある程度の高AoA機動が可能
     CD0: 0.023,
     k: 0.108,
+    machCrit: 0.85, waveDragPeak: 0.045,
     maxThrust: 163000,      // N（RD-33 ×2基 アフターバーナー合計）
     rollRateMax: 240 * DEG,
     pitchRateMax: 40 * DEG,
@@ -571,6 +601,7 @@ const AIRCRAFT_DB = {
     extendedRange: 12 * DEG,
     CD0: 0.026,
     k: 0.105,
+    machCrit: 0.84, waveDragPeak: 0.050,
     maxThrust: 220000,      // N（F110-GE-400 ×2基 アフターバーナー合計）
     rollRateMax: 160 * DEG, // 大型・重量機のため roll は控えめ
     pitchRateMax: 30 * DEG,
@@ -591,6 +622,7 @@ const AIRCRAFT_DB = {
     extendedRange: 18 * DEG,
     CD0: 0.019,
     k: 0.095,               // 効率の良い主翼で持続旋回性能に優れる
+    machCrit: 0.86, waveDragPeak: 0.040,
     maxThrust: 210000,      // N（F100-PW-229 ×2基 アフターバーナー合計。高い推力重量比）
     rollRateMax: 280 * DEG,
     pitchRateMax: 38 * DEG,
@@ -615,6 +647,7 @@ const AIRCRAFT_DB = {
                               // 「リミッター解除中の旋回率が貧弱」になってしまっていた。
     CD0: 0.021,
     k: 0.100,
+    machCrit: 0.83, waveDragPeak: 0.045,
     maxThrust: 157000,      // N（F404-GE-402 ×2基 アフターバーナー合計）
     rollRateMax: 260 * DEG,
     pitchRateMax: 36 * DEG,
@@ -648,6 +681,7 @@ const AIRCRAFT_DB = {
     extendedRange: 8 * DEG,
     CD0: 0.021,
     k: 0.085,
+    machCrit: 0.75, waveDragPeak: 0.08, // 層流翼は当時としては圧縮性に強いが、急降下では顕著に効いてくる
     enginePower: 1120000,   // W（Packard V-1650-7 約1,500hp相当）
     propEfficiency: 0.85,
     maxThrust: 11000,       // N（低速域での静止推力の目安上限）
@@ -678,6 +712,7 @@ const AIRCRAFT_DB = {
     extendedRange: 8 * DEG,
     CD0: 0.020,
     k: 0.060,               // 楕円翼は誘導抗力が最も少ない
+    machCrit: 0.78, waveDragPeak: 0.07, // 良好な急降下特性で知られる、レシプロ機の中では圧縮性に最も強い
     enginePower: 1030000,   // W（Merlin 61 約1,380hp相当）
     propEfficiency: 0.85,
     maxThrust: 10000,
@@ -707,6 +742,7 @@ const AIRCRAFT_DB = {
     extendedRange: 6 * DEG,
     CD0: 0.023,
     k: 0.095,
+    machCrit: 0.72, waveDragPeak: 0.09, // 厚めの翼で、レシプロ機の中でも圧縮性の影響が早く出る
     enginePower: 1250000,   // W（BMW 801D-2 約1,677hp相当）
     propEfficiency: 0.83,
     maxThrust: 12000,
@@ -737,6 +773,7 @@ const AIRCRAFT_DB = {
     extendedRange: 10 * DEG,
     CD0: 0.022,
     k: 0.075,
+    machCrit: 0.68, waveDragPeak: 0.10, // 薄翼だが構造上、高速急降下には最も弱い
     enginePower: 830000,    // W（栄21型 約1,130hp相当。同世代の他国機より非力）
     propEfficiency: 0.82,
     maxThrust: 7500,
@@ -1272,7 +1309,9 @@ function stepPhysics(state, controls, dt, opponent) {
   const CLmaxForG = maxLiftMag / (qDyn * p.wingArea);
   CL = THREE.MathUtils.clamp(CL, -CLmaxForG, CLmaxForG);
 
-  const CD = p.CD0 + (flapsActive ? (p.flapDragBonus || 0) : 0) + p.k * CL * CL + (state.airbrake ? 0.07 : 0) + Math.abs(beta) * 0.15;
+  const mach = V / speedOfSoundAt(state.position.y);
+  const CDwave = waveDragCD(mach, p.machCrit, p.waveDragPeak);
+  const CD = p.CD0 + CDwave + (flapsActive ? (p.flapDragBonus || 0) : 0) + p.k * CL * CL + (state.airbrake ? 0.07 : 0) + Math.abs(beta) * 0.15;
 
   // --- 力の計算 ---
   const velDir = state.velocity.clone().normalize();
@@ -1535,7 +1574,7 @@ function computeAIControls(ai, target, dt) {
     ai.evading = false;
   }
 
-  const pitchGainBase = extendedActive ? 5 : 2.4;
+  const pitchGainBase = extendedActive ? 6 : 4.0;
 
   if (ai.evading) {
     // ブレイクターン：相手の方向へ最大舵で切り返し、相手の照準の先読み（リード）を無効化する
@@ -1550,7 +1589,7 @@ function computeAIControls(ai, target, dt) {
     if (elevator > 0) elevator *= alphaMarginFactor;
     return {
       elevator,
-      aileron: THREE.MathUtils.clamp((yawErr * 1.5 + rollDamp) * AI_BREAK_GAIN_MULT, -1, 1),
+      aileron: THREE.MathUtils.clamp((yawErr * 2.2 + rollDamp) * AI_BREAK_GAIN_MULT, -1, 1),
       rudder: THREE.MathUtils.clamp(yawErr * 0.4, -1, 1),
       throttleUp: true,
       throttleDown: false,
@@ -1589,7 +1628,7 @@ function computeAIControls(ai, target, dt) {
   const rollDamp = (ai.angVel.p / p.rollRateMax) * 0.5;
   const pitchDamp = (ai.angVel.q / p.pitchRateMax) * 0.45;
 
-  const aileron = THREE.MathUtils.clamp(yawErr * 1.5 + rollDamp, -1, 1);
+  const aileron = THREE.MathUtils.clamp(yawErr * 2.2 + rollDamp, -1, 1);
   const rudder = THREE.MathUtils.clamp(yawErr * 0.4, -1, 1);
   let elevator = THREE.MathUtils.clamp(pitchErr * pitchGainBase - pitchDamp, -1, 1);
   if (elevator > 0) elevator *= alphaMarginFactor;
