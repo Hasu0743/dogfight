@@ -1168,10 +1168,20 @@ function propThrustMagnitude(p, V) {
   return Math.min(p.maxThrust, powerThrust);
 }
 
+// ジェットエンジンの推力は吸い込む空気の密度にほぼ比例して高度と共に落ちる
+// （高高度では海面の3〜4割程度まで低下するのが一般的）。この减衰が無いと、
+// 高高度でも海面と同じ推力が出せてしまい、高高度巡航・高高度での格闘戦が
+// 実際より有利になりすぎる（＝速度もエネルギーも落ちないので旋回が緩く感じる一因）。
+const THRUST_ALT_LAPSE_EXP = 0.7; // 密度比に対するべき指数（経験的な近似値）
+const THRUST_ALT_LAPSE_FLOOR = 0.15; // 成層圏近くでも完全に0にはしない下限
+function thrustAltitudeFactor(rho) {
+  return Math.max(THRUST_ALT_LAPSE_FLOOR, Math.pow(rho / RHO_SEA_LEVEL, THRUST_ALT_LAPSE_EXP));
+}
+
 // 機体のカテゴリ（ジェット/レシプロ）に応じて推力の出方を切り替える共通窓口
-function thrustMagnitude(p, V, throttle) {
+function thrustMagnitude(p, V, throttle, rho) {
   if (p.category === "prop") return throttle * propThrustMagnitude(p, V);
-  return throttle * p.maxThrust * thrustPowerFactor(V);
+  return throttle * p.maxThrust * thrustPowerFactor(V) * thrustAltitudeFactor(rho);
 }
 
 // 拡張モード（ジェット機：Su-27のコブラ機動やMiG-29の準拡張機動／レシプロ機：コンバット
@@ -1326,7 +1336,7 @@ function stepPhysics(state, controls, dt, opponent) {
 
   const liftForce = liftDir.multiplyScalar(liftMag);
   const dragForce = velDir.clone().multiplyScalar(-dragMag);
-  const thrustForce = forward.clone().multiplyScalar(thrustMagnitude(p, V, state.throttle));
+  const thrustForce = forward.clone().multiplyScalar(thrustMagnitude(p, V, state.throttle, rho));
   const gravityForce = new THREE.Vector3(0, -p.mass * G, 0);
 
   // --- 横方向の力（垂直尾翼の復元力）：ピッチ方向の揚力と対になる仕組みで、
