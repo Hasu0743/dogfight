@@ -926,7 +926,7 @@ window.addEventListener("keydown", (e) => {
 // ================================================================
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fc6ff);
-scene.fog = new THREE.Fog(0x8fc6ff, 500, 6000);
+scene.fog = new THREE.Fog(0x8fc6ff, 500, 14000); // 高高度(11,000m級)からでも地面がうっすら見えるよう遠方まで伸ばす
 
 const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.5, 20000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -944,9 +944,29 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.0);
 sun.position.set(300, 500, 100);
 scene.add(sun);
 
-// 地面（グリッドで高度・移動が分かるようにする）
+// 地面：単色の平面だけだと高高度から見た時に距離感の手がかりが無く、高度が掴みにくかったため、
+// 畑のような市松模様のテクスチャを敷いて、どんな高度からでも遠近感（視差）が働くようにする。
+function makeGroundTexture() {
+  const size = 256;
+  const cnv = document.createElement("canvas");
+  cnv.width = cnv.height = size;
+  const c = cnv.getContext("2d");
+  c.fillStyle = "#2f6b3a";
+  c.fillRect(0, 0, size, size);
+  c.fillStyle = "#376f42";
+  const tile = size / 8;
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      if ((x + y) % 2 === 0) c.fillRect(x * tile, y * tile, tile, tile);
+    }
+  }
+  const tex = new THREE.CanvasTexture(cnv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(80, 80); // 20,000m四方に1区画250m相当のマス目を敷き詰める
+  return tex;
+}
 const groundGeo = new THREE.PlaneGeometry(20000, 20000);
-const groundMat = new THREE.MeshStandardMaterial({ color: 0x2f6b3a });
+const groundMat = new THREE.MeshStandardMaterial({ map: makeGroundTexture() });
 const ground = new THREE.Mesh(groundGeo, groundMat);
 ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
