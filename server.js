@@ -126,6 +126,20 @@ function handleResult(req, res) {
   });
 }
 
+// お知らせ：announcement.json を手で書き換えるだけで、次にアクセスしたプレイヤー全員に
+// ポップアップで通知できる（サーバー再起動不要、ファイルが無ければ「お知らせ無し」扱い）。
+const ANNOUNCEMENT_FILE = path.join(__dirname, "announcement.json");
+function handleAnnouncement(req, res) {
+  fs.readFile(ANNOUNCEMENT_FILE, "utf8", (err, data) => {
+    let payload = { id: "", message: "" };
+    if (!err) {
+      try { payload = JSON.parse(data); } catch {}
+    }
+    res.writeHead(200, { ...CORS_HEADERS, "Content-Type": "application/json" });
+    res.end(JSON.stringify(payload));
+  });
+}
+
 function handleStatsLookup(req, res, url) {
   const name = normalizeName(url.searchParams.get("name"));
   const entry = stats[name] || { wins: 0, total: 0 };
@@ -166,6 +180,10 @@ const httpServer = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (req.method === "GET" && url.pathname === "/stats") {
     handleStatsLookup(req, res, url);
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/announcement") {
+    handleAnnouncement(req, res);
     return;
   }
   if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index2_6dof.html")) {

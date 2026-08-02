@@ -140,6 +140,8 @@
   .menuBtn.secondary { background: #3a4750; color: #eafff0; }
   .menuBtn:disabled { opacity: 0.6; cursor: default; }
   .menuNote { color: #ffd166; font-size: 13px; min-height: 1.4em; white-space: pre-line; }
+  .downloadNote { color: #7fd6a8; font-size: 12px; margin-top: 4px; }
+  .downloadNote a { color: #06d6a0; }
 
   /* メニュー画面限定のサイド広告（HUDパネルと被らないよう上下にマージンを確保） */
   .sideAd {
@@ -261,6 +263,20 @@
     background: rgba(11,22,32,0.8); color: #eafff0; border: 1px solid #567; font-size: 12px;
   }
   #chatInput:focus { border-color: #06d6a0; }
+
+  /* ============================================================
+     11. お知らせポップアップ
+     ============================================================ */
+  #announcementPanel {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    pointer-events: auto; display: none; z-index: 1200;
+    width: min(420px, 88vw); background: rgba(10,16,20,0.97); border: 1px solid #ffd166;
+    border-radius: 10px; padding: 18px; text-align: left;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+  }
+  #announcementPanel.active { display: block; }
+  #announcementPanel h2 { margin: 0 0 10px; font-size: 15px; color: #ffd166; }
+  #announcementMessage { white-space: pre-line; font-size: 14px; line-height: 1.6; margin: 0 0 14px; }
   .keyBindRow {
     display: flex; align-items: center; justify-content: space-between;
     padding: 6px 0; border-bottom: 1px solid #234; font-size: 13px;
@@ -287,6 +303,14 @@
       <button class="menuBtn secondary" id="feedbackClose">閉じる</button>
     </div>
     <p id="feedbackStatus"></p>
+  </div>
+
+  <div id="announcementPanel">
+    <h2>お知らせ</h2>
+    <p id="announcementMessage"></p>
+    <div class="menuButtons">
+      <button class="menuBtn" id="announcementClose">閉じる</button>
+    </div>
   </div>
 
   <button id="settingsBtn" title="設定">⚙ 設定</button>
@@ -411,6 +435,10 @@
         <input type="text" id="serverUrlInput" placeholder="ws://localhost:8080">
       </div>
       <p class="menuNote" id="menuNote"></p>
+      <p class="downloadNote">
+        <a href="index2_6dof.html" download>このゲームをダウンロード</a><br>
+        サーバーが落ちていても、保存したファイルを開けばAI対戦だけは遊べます。
+      </p>
     </div>
 
     <div class="screen" id="screenCategorySelect">
@@ -898,14 +926,14 @@ const BULLET_SIM_MAXTIME = 2.2;
 
 // --- 1-5. 敵AI定数：優先度1＝失速回避、優先度2＝高度セーフティ、優先度2.5＝被弾回避、
 //     優先度3＝追尾（常にリードパーシュート。スロットルだけが唯一の駆け引き要素） ---
-const AI_STALL_ENTER_MARGIN = 4 * DEG; // 失速角にこれだけ近づいたら回避行動に入る
-const AI_STALL_EXIT_MARGIN = 9 * DEG;  // 失速角からこれだけ離れたら追尾に復帰する（バタつき防止）
-const AI_ALT_FLOOR = 200;        // m。これを下回ったら高度回復を最優先にする
+const AI_STALL_ENTER_MARGIN = 1 * DEG; // 失速角にこれだけ近づいたら回避行動に入る
+const AI_STALL_EXIT_MARGIN = 3 * DEG;  // 失速角からこれだけ離れたら追尾に復帰する（バタつき防止）
+const AI_ALT_FLOOR = 200;        //S m。これを下回ったら高度回復を最優先にする
 const AI_ALT_SAFE = 400;        // m。ここまで回復すれば通常運用に戻る
 const AI_ALT_DESCENT_WARN = -50; // m/s。低空でこれより速く沈下していたら早めに警戒する
 const AI_CLOSE_RANGE = 1200;      // m。これより近ければ「格闘戦の間合い」＝相手のペースに合わせる対象
 const AI_HARD_TURN_ANGLE = 20 * DEG; // これ以上の舵角を要求する時は「きつく旋回したい」状況とみなす
-const AI_OVERSPEED_RATIO = 1.15;  // 相手より速度がこの倍率を超えたら「速すぎ」とみなす目安
+const AI_OVERSPEED_RATIO = 1.2;  // 相手より速度がこの倍率を超えたら「速すぎ」とみなす目安
                                    // （プレイヤーが意図的に減速してきつい旋回戦を仕掛けてきた時、
                                    //   AIもこれを検知して速度を合わせにいく＝唯一のスロットル判断）
 
@@ -1251,7 +1279,7 @@ function createState(typeKey, position, headingDeg, isPlayer) {
 // ================================================================
 
 // --- 推力パワーカーブ：対気速度Vに応じてエンジン出力に倍率をかける
-//     （低速域0.8× → 800km/h前後で1.0× → 1,000km/h以降で1.2×、その先は頭打ち） ---
+//     （低速域0.8× → 800km/h前後で1.0× → 1,000km/h以降で1.0×、その先は頭打ち） ---
 function thrustPowerFactor(V) {
   if (V <= THRUST_PWR_MID_SPEED) {
     const t = THREE.MathUtils.clamp(V / THRUST_PWR_MID_SPEED, 0, 1);
@@ -1816,7 +1844,7 @@ function computeAIControls(ai, target, dt) {
   // ペースを察知して自然に速度を合わせにいく（＝低速・近距離まで持ち込まれれば、拡張
   // モード＝コブラ機動も誘発されうる）。それ以外は距離を詰める/保つため通常運用。
   const wantsHardTurn = Math.abs(pitchErr) > AI_HARD_TURN_ANGLE || Math.abs(yawErr) > AI_HARD_TURN_ANGLE;
-  const speedRatio = ai.hud.speed / Math.max(target.hud.speed, 30);
+  const speedRatio = ai.hud.speed / Math.max(target.hud.speed, 30);//CLAUDEくんへ:速度比率でなくして速度差でスロットル減速の判断をさせたいので改変よろしく！'26/08/02
   const overspeedForTurn = dist < AI_CLOSE_RANGE && wantsHardTurn && speedRatio > AI_OVERSPEED_RATIO;
 
   return {
@@ -1870,7 +1898,7 @@ const camPosSmoothed = new THREE.Vector3();
 const camLookSmoothed = new THREE.Vector3();
 const camRefQuat = new THREE.Quaternion();
 let camInit = false;
-let camFOV = 80;
+let camFOV = 90;
 let camDistFactor = 1;
 let prevShiftHeld = false;
 let camTransitionTimer = 0; // Shiftの押下/解放の直後だけ、切り替えを速くするためのタイマー
@@ -2813,6 +2841,30 @@ function fetchAndShowRank() {
     .then((entry) => renderRankDisplay(entry))
     .catch(() => { rankDisplayEl.textContent = "サーバーに接続できませんでした"; });
 }
+// --- お知らせポップアップ：起動時に一度だけサーバーに確認し、前回見たものと違えば表示する ---
+const announcementPanelEl = document.getElementById("announcementPanel");
+const announcementMessageEl = document.getElementById("announcementMessage");
+function checkAnnouncement() {
+  const url = getServerUrl().replace(/^ws/, "http") + "/announcement";
+  fetch(url)
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => {
+      if (!data || !data.message || !data.id) return;
+      let seenId = "";
+      try { seenId = localStorage.getItem("dogfightSeenAnnouncementId") || ""; } catch {}
+      if (data.id === seenId) return;
+      announcementMessageEl.textContent = data.message;
+      announcementPanelEl.classList.add("active");
+      announcementPanelEl.dataset.currentId = data.id;
+    })
+    .catch(() => {}); // サーバーに繋がらない場合（ローカル保存版など）は何も表示しない
+}
+document.getElementById("announcementClose").addEventListener("click", () => {
+  announcementPanelEl.classList.remove("active");
+  try { localStorage.setItem("dogfightSeenAnnouncementId", announcementPanelEl.dataset.currentId || ""); } catch {}
+});
+checkAnnouncement();
+
 function reportMatchResult(won) {
   const name = loadPlayerName().trim() || "名無しさん";
   const url = getServerUrl().replace(/^ws/, "http") + "/result";
