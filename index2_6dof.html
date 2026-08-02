@@ -240,6 +240,27 @@
     background: #0b1620; color: #eafff0; border: 1px solid #567; font-size: 14px;
   }
   #rankDisplay { color: #ffd166; font-size: 13px; margin: 0; }
+
+  /* ============================================================
+     10. チャット（オンライン対戦中のみ表示）
+     ============================================================ */
+  #chatBox {
+    position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    width: min(360px, 60vw); display: none; pointer-events: auto; z-index: 400;
+  }
+  #chatBox.active { display: block; }
+  #chatLog {
+    max-height: 90px; overflow-y: auto; margin-bottom: 4px;
+    background: rgba(10,16,20,0.6); border-radius: 6px; padding: 4px 8px;
+    font-size: 12px; line-height: 1.5;
+  }
+  #chatLog .chatSelf { color: #9fd6b0; }
+  #chatLog .chatOpponent { color: #ffd166; }
+  #chatInput {
+    width: 100%; box-sizing: border-box; padding: 6px 10px; border-radius: 6px;
+    background: rgba(11,22,32,0.8); color: #eafff0; border: 1px solid #567; font-size: 12px;
+  }
+  #chatInput:focus { border-color: #06d6a0; }
   .keyBindRow {
     display: flex; align-items: center; justify-content: space-between;
     padding: 6px 0; border-bottom: 1px solid #234; font-size: 13px;
@@ -328,6 +349,11 @@
   <div class="panel" id="bottomleft">
     <span id="matchupLabel"></span><br>
     <span id="controlsHint"></span>
+  </div>
+
+  <div id="chatBox">
+    <div id="chatLog"></div>
+    <input type="text" id="chatInput" maxlength="200" placeholder="Enterで送信 (Tでチャット欄へ)">
   </div>
 
   <div id="gunsFlash">GUNS!</div>
@@ -1562,12 +1588,12 @@ const keys = {};
 const DEFAULT_KEY_BINDINGS = {
   pitchUp: "w", pitchDown: "s", rollLeft: "a", rollRight: "d",
   yawLeft: "q", yawRight: "e", throttleUp: "r", throttleDown: "f",
-  airbrake: " ", lookEnemy: "shift",
+  airbrake: " ", lookEnemy: "shift", chat: "t",
 };
 const KEY_BIND_LABELS = {
   pitchUp: "機首上げ", pitchDown: "機首下げ", rollLeft: "ロール左", rollRight: "ロール右",
   yawLeft: "ヨー左", yawRight: "ヨー右", throttleUp: "スロットル増", throttleDown: "スロットル減",
-  airbrake: "エアブレーキ", lookEnemy: "敵機を見る",
+  airbrake: "エアブレーキ", lookEnemy: "敵機を見る", chat: "チャット欄を開く",
 };
 function loadKeyBindings() {
   let saved = {};
@@ -1599,6 +1625,8 @@ function updateControlsHint() {
     `${formatKeyLabel(k.yawLeft)}/${formatKeyLabel(k.yawRight)} ヨー ・ ` +
     `${formatKeyLabel(k.throttleUp)}/${formatKeyLabel(k.throttleDown)} スロットル ・ ` +
     `${formatKeyLabel(k.airbrake)} エアブレーキ ・ ${formatKeyLabel(k.lookEnemy)} 敵機を見る`;
+  const chatInputEl = document.getElementById("chatInput");
+  if (chatInputEl) chatInputEl.placeholder = `Enterで送信 (${formatKeyLabel(k.chat)}でチャット欄へ)`;
 }
 updateControlsHint();
 
@@ -1616,7 +1644,15 @@ window.addEventListener("keydown", (e) => {
     renderKeyBindRows();
     return;
   }
-  if (!isTypingInField()) keys[e.key.toLowerCase()] = true;
+  if (!isTypingInField()) {
+    const k = e.key.toLowerCase();
+    if (k === keyBindings.chat && mode === "online" && running && !gameOver) {
+      e.preventDefault();
+      document.getElementById("chatInput").focus();
+      return;
+    }
+    keys[k] = true;
+  }
 });
 window.addEventListener("keyup", (e) => { if (!isTypingInField()) keys[e.key.toLowerCase()] = false; });
 
@@ -1819,8 +1855,9 @@ function resetGame(playerType, enemyType, side) {
   tracerAccumPlayer = 0;
   tracerAccumEnemy = 0;
 
-  enemyPanelLabelEl.textContent = `ENEMY (${enemy.params.label})`;
-  matchupLabelEl.textContent = `自機: ${player.params.label} ／ 敵機: ${enemy.params.label}`;
+  const enemyNamePrefix = mode === "online" && opponentName ? `${opponentName} / ` : "";
+  enemyPanelLabelEl.textContent = `ENEMY (${enemyNamePrefix}${enemy.params.label})`;
+  matchupLabelEl.textContent = `自機: ${player.params.label} ／ 敵機: ${enemyNamePrefix}${enemy.params.label}`;
 }
 
 
@@ -2308,7 +2345,7 @@ function onAircraftCardClick(key) {
     }
   } else if (mode === "online") {
     myAircraftChoice = key;
-    sendNet({ type: "select_aircraft", aircraft: key });
+    sendNet({ type: "select_aircraft", aircraft: key, name: loadPlayerName() || "名無しさん" });
     selectStatusEl.textContent = opponentAircraftChoice
       ? "対戦相手の準備を待っています…"
       : "対戦相手の機体選択を待っています…";
@@ -2323,6 +2360,8 @@ function startOnlineMatch() {
   running = true;
   lastTime = performance.now();
   hideCenterMessage();
+  resetChat();
+  chatBoxEl.classList.add("active");
 }
 
 const btnPrimaryEl = document.getElementById("btnPrimary");
@@ -2378,6 +2417,7 @@ let ws = null;
 let onlineSide = null;               // "A" | "B"
 let myAircraftChoice = null;
 let opponentAircraftChoice = null;
+let opponentName = null;
 let remoteState = null;              // 相手機の最新ネットワーク状態（補間の目標値）
 let stateSendAccum = 0;
 const STATE_SEND_INTERVAL = 1 / 20;  // 状態送信は20Hzで十分（毎フレーム送ると帯域を無駄にする）
@@ -2444,6 +2484,41 @@ function sendNet(msg) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
+// --- チャット（オンライン対戦中のみ） ---
+const chatBoxEl = document.getElementById("chatBox");
+const chatLogEl = document.getElementById("chatLog");
+const chatInputEl = document.getElementById("chatInput");
+
+function appendChatLine(name, text, isSelf) {
+  const line = document.createElement("div");
+  line.className = isSelf ? "chatSelf" : "chatOpponent";
+  line.textContent = `${name}: ${text}`;
+  chatLogEl.appendChild(line);
+  chatLogEl.scrollTop = chatLogEl.scrollHeight;
+}
+
+function resetChat() {
+  chatLogEl.innerHTML = "";
+  chatInputEl.value = "";
+}
+
+chatInputEl.addEventListener("keydown", (e) => {
+  e.stopPropagation(); // ゲーム側のkeydownリスナーにWASD等を渡さない
+  if (e.key === "Enter") {
+    const text = chatInputEl.value.trim();
+    if (text) {
+      const myName = loadPlayerName() || "名無しさん";
+      sendNet({ type: "chat", name: myName, text });
+      appendChatLine(myName, text, true);
+    }
+    chatInputEl.value = "";
+    chatInputEl.blur();
+  } else if (e.key === "Escape") {
+    chatInputEl.value = "";
+    chatInputEl.blur();
+  }
+});
+
 function leaveOnlineMatch() {
   if (ws) {
     sendNet({ type: "leave_match" });
@@ -2451,6 +2526,7 @@ function leaveOnlineMatch() {
     ws.close();
     ws = null;
   }
+  chatBoxEl.classList.remove("active");
 }
 
 function handleServerDisconnect() {
@@ -2481,12 +2557,14 @@ function handleServerMessage(msg) {
       matchCategory = msg.category === "prop" ? "prop" : "jet"; // 部屋作成者/ランダムマッチのキューが決めたカテゴリをサーバーから受け取る
       myAircraftChoice = null;
       opponentAircraftChoice = null;
+      opponentName = null;
       showAircraftSelect("対戦相手が見つかりました！機体を選んでください。");
       break;
     case "opponent_selected":
       opponentAircraftChoice = msg.aircraft;
+      opponentName = msg.name || null;
       if (mode === "online") {
-        const note = `対戦相手: ${AIRCRAFT_DB[msg.aircraft].label}`;
+        const note = `対戦相手: ${opponentName ? opponentName + " / " : ""}${AIRCRAFT_DB[msg.aircraft].label}`;
         selectNoteEl.textContent = note;
         if (myAircraftChoice) selectStatusEl.textContent = "対戦相手の準備を待っています…";
       }
@@ -2497,12 +2575,16 @@ function handleServerMessage(msg) {
     case "state":
       onRemoteState(msg.data);
       break;
+    case "chat":
+      appendChatLine(msg.name || "対戦相手", msg.text, false);
+      break;
     case "opponent_died":
       if (mode === "online" && running && !gameOver) endGame(true);
       break;
     case "rematch_ready":
       myAircraftChoice = null;
       opponentAircraftChoice = null;
+      opponentName = null;
       remoteState = null;
       showAircraftSelect("同じ相手ともう一度！機体を選んでください。");
       break;

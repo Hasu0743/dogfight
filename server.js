@@ -32,6 +32,7 @@ const FEEDBACK_FILE = path.join(__dirname, "feedback.log");
 const FEEDBACK_MAX_LEN = 4000; // 1件あたりの本文の最大文字数（荒らし・誤爆対策）
 const STATS_FILE = path.join(__dirname, "stats.json");
 const NAME_MAX_LEN = 16;
+const CHAT_MAX_LEN = 200;
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*", // file:// で開いたクライアントからも送れるようにする
@@ -286,7 +287,7 @@ wss.on("connection", (ws) => {
       case "select_aircraft": {
         if (!ws.opponent) break;
         ws.myAircraft = msg.aircraft;
-        send(ws.opponent, { type: "opponent_selected", aircraft: msg.aircraft });
+        send(ws.opponent, { type: "opponent_selected", aircraft: msg.aircraft, name: normalizeName(msg.name) });
         if (ws.opponent.myAircraft) {
           send(ws, { type: "start" });
           send(ws.opponent, { type: "start" });
@@ -301,6 +302,14 @@ wss.on("connection", (ws) => {
 
       case "i_died": {
         if (ws.opponent) send(ws.opponent, { type: "opponent_died" });
+        break;
+      }
+
+      case "chat": {
+        if (!ws.opponent) break;
+        const text = String(msg.text || "").slice(0, CHAT_MAX_LEN).trim();
+        if (!text) break;
+        send(ws.opponent, { type: "chat", name: normalizeName(msg.name), text });
         break;
       }
 
