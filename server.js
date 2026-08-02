@@ -30,12 +30,29 @@ const { WebSocketServer, WebSocket } = require("ws");
 const PORT = process.env.PORT || 8080;
 const FEEDBACK_FILE = path.join(__dirname, "feedback.log");
 const FEEDBACK_MAX_LEN = 4000; // 1件あたりの本文の最大文字数（荒らし・誤爆対策）
+const STATS_FILE = path.join(__dirname, "stats.json");
+const NAME_MAX_LEN = 16;
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*", // file:// で開いたクライアントからも送れるようにする
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
+
+// --- 緩いランク（勝率ベースの称号）用の戦績。名前は自己申告なので、
+//     アカウント認証も不正防止もしない「友達内で遊ぶ前提」の軽い仕組み。 ---
+let stats = {};
+try {
+  stats = JSON.parse(fs.readFileSync(STATS_FILE, "utf8"));
+} catch {
+  stats = {};
+}
+function saveStats() {
+  fs.writeFile(STATS_FILE, JSON.stringify(stats), () => {}); // 失敗しても対戦自体は継続させたいので結果は見ない
+}
+function normalizeName(raw) {
+  return String(raw || "").trim().slice(0, NAME_MAX_LEN) || "名無しさん";
+}
 
 function handleFeedback(req, res) {
   let body = "";
@@ -77,6 +94,44 @@ function handleFeedback(req, res) {
   });
 }
 
+function handleResult(req, res) {
+  let body = "";
+  req.on("data", (chunk) => {
+    body += chunk;
+    if (body.length > 2000) req.destroy();
+  });
+  req.on("end", () => {
+    let payload;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      res.writeHead(400, CORS_HEADERS);
+      res.end("invalid json");
+      return;
+    }
+    const name = normalizeName(payload.name);
+    if (payload.result !== "win" && payload.result !== "loss") {
+      res.writeHead(400, CORS_HEADERS);
+      res.end("result must be 'win' or 'loss'");
+      return;
+    }
+    const entry = stats[name] || { wins: 0, total: 0 };
+    entry.total += 1;
+    if (payload.result === "win") entry.wins += 1;
+    stats[name] = entry;
+    saveStats();
+    res.writeHead(200, { ...CORS_HEADERS, "Content-Type": "application/json" });
+    res.end(JSON.stringify(entry));
+  });
+}
+
+function handleStatsLookup(req, res, url) {
+  const name = normalizeName(url.searchParams.get("name"));
+  const entry = stats[name] || { wins: 0, total: 0 };
+  res.writeHead(200, { ...CORS_HEADERS, "Content-Type": "application/json" });
+  res.end(JSON.stringify(entry));
+}
+
 const httpServer = http.createServer((req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, CORS_HEADERS); // プリフライトリクエストへの応答
@@ -85,6 +140,15 @@ const httpServer = http.createServer((req, res) => {
   }
   if (req.method === "POST" && req.url === "/feedback") {
     handleFeedback(req, res);
+    return;
+  }
+  if (req.method === "POST" && req.url === "/result") {
+    handleResult(req, res);
+    return;
+  }
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  if (req.method === "GET" && url.pathname === "/stats") {
+    handleStatsLookup(req, res, url);
     return;
   }
   res.writeHead(404, CORS_HEADERS);

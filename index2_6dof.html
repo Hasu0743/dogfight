@@ -239,6 +239,7 @@
     width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px;
     background: #0b1620; color: #eafff0; border: 1px solid #567; font-size: 14px;
   }
+  #rankDisplay { color: #ffd166; font-size: 13px; margin: 0; }
   .keyBindRow {
     display: flex; align-items: center; justify-content: space-between;
     padding: 6px 0; border-bottom: 1px solid #234; font-size: 13px;
@@ -273,6 +274,9 @@
 
     <h3>プレイヤー名</h3>
     <input type="text" id="playerNameInput" maxlength="16" placeholder="名無しさん">
+
+    <h3>戦績（オンライン対戦のみ集計）</h3>
+    <p id="rankDisplay">未対戦</p>
 
     <h3>キー操作</h3>
     <div id="keyBindRows"></div>
@@ -2336,6 +2340,8 @@ function endGame(playerWon, customMessage) {
     return;
   }
 
+  if (mode === "online") reportMatchResult(playerWon); // 緩いランクはオンライン対戦のみ集計
+
   msgTitle.textContent = playerWon ? "撃墜成功！" : "撃墜された…";
   msgBody.textContent = customMessage || (playerWon ? "敵機を撃墜しました。" : "敵の射線に入ってしまいました。");
   btnPrimaryEl.style.display = "";
@@ -2692,7 +2698,51 @@ function savePlayerName(name) {
   try { localStorage.setItem("dogfightPlayerName", name.trim().slice(0, 16)); } catch {}
 }
 playerNameInputEl.value = loadPlayerName();
-playerNameInputEl.addEventListener("change", () => savePlayerName(playerNameInputEl.value));
+playerNameInputEl.addEventListener("change", () => {
+  savePlayerName(playerNameInputEl.value);
+  fetchAndShowRank();
+});
+
+// --- 緩いランク（勝率ベースの称号、オンライン対戦のみ集計） ---
+const rankDisplayEl = document.getElementById("rankDisplay");
+function titleForStats(entry) {
+  if (!entry || entry.total === 0) return "新米パイロット";
+  const rate = entry.wins / entry.total;
+  if (rate >= 0.9) return "伝説のパイロット";
+  if (rate >= 0.7) return "エース";
+  if (rate >= 0.5) return "エース候補";
+  if (rate >= 0.3) return "一人前";
+  return "見習い";
+}
+function renderRankDisplay(entry) {
+  if (!entry || entry.total === 0) {
+    rankDisplayEl.textContent = `${titleForStats(entry)}（まだ未対戦）`;
+    return;
+  }
+  const ratePct = Math.round((entry.wins / entry.total) * 100);
+  rankDisplayEl.textContent = `${titleForStats(entry)}（勝率${ratePct}%、${entry.total}戦${entry.wins}勝）`;
+}
+function fetchAndShowRank() {
+  const name = (playerNameInputEl.value || "").trim() || "名無しさん";
+  const url = getServerUrl().replace(/^ws/, "http") + "/stats?name=" + encodeURIComponent(name);
+  rankDisplayEl.textContent = "読み込み中…";
+  fetch(url)
+    .then((res) => (res.ok ? res.json() : null))
+    .then((entry) => renderRankDisplay(entry))
+    .catch(() => { rankDisplayEl.textContent = "サーバーに接続できませんでした"; });
+}
+function reportMatchResult(won) {
+  const name = loadPlayerName().trim() || "名無しさん";
+  const url = getServerUrl().replace(/^ws/, "http") + "/result";
+  fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, result: won ? "win" : "loss" }),
+  })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((entry) => { if (entry) renderRankDisplay(entry); })
+    .catch(() => {}); // 戦績報告に失敗しても対戦結果画面は問題なく続行させる
+}
 
 function rebindAction(action, newKey) {
   // 既に他の操作に割り当て済みのキーを選んだ場合は、元の割り当てと入れ替える
@@ -2728,6 +2778,7 @@ settingsBtnEl.addEventListener("click", () => {
   clearHeldKeys();
   awaitingKeyFor = null;
   renderKeyBindRows();
+  fetchAndShowRank();
   settingsPanelEl.classList.add("active");
 });
 
