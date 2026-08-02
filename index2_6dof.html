@@ -213,6 +213,44 @@
     padding: 8px; font-size: 13px; font-family: inherit;
   }
   #feedbackStatus { color: #7fd6a8; font-size: 12px; min-height: 1.4em; margin: 6px 0 0; }
+
+  /* ============================================================
+     9. キーコンフィグ
+     ============================================================ */
+  #settingsBtn {
+    position: absolute; top: 14px; left: 50%; transform: translateX(calc(-50% + 130px));
+    pointer-events: auto; cursor: pointer; z-index: 500;
+    background: rgba(20,30,25,0.7); color: #9fd6b0; border: 1px solid #3a4750;
+    border-radius: 6px; padding: 5px 10px; font-size: 12px;
+  }
+  #settingsBtn:hover { background: rgba(6,214,160,0.2); border-color: #06d6a0; }
+  #settingsPanel {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    pointer-events: auto; display: none; z-index: 1000;
+    width: min(420px, 88vw); max-height: 80vh; overflow-y: auto;
+    background: rgba(10,16,20,0.95); border: 1px solid #3a4750;
+    border-radius: 10px; padding: 16px; text-align: left;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+  }
+  #settingsPanel.active { display: block; }
+  #settingsPanel h2 { margin: 0 0 8px; font-size: 16px; }
+  #settingsPanel h3 { margin: 16px 0 6px; font-size: 13px; color: #7fd6a8; }
+  #playerNameInput {
+    width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px;
+    background: #0b1620; color: #eafff0; border: 1px solid #567; font-size: 14px;
+  }
+  .keyBindRow {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 0; border-bottom: 1px solid #234; font-size: 13px;
+  }
+  .keyBindLabel { color: #cde; }
+  .keyBindKey {
+    min-width: 70px; text-align: center; padding: 4px 8px; border-radius: 4px;
+    background: #0b1620; border: 1px solid #567; color: #ffd166; font-weight: bold;
+    cursor: pointer; font-size: 12px;
+  }
+  .keyBindKey.waiting { border-color: #06d6a0; color: #06d6a0; }
+  .keyBindKey.duplicate { border-color: #ef476f; color: #ef476f; }
 </style>
 </head>
 <body>
@@ -227,6 +265,21 @@
       <button class="menuBtn secondary" id="feedbackClose">閉じる</button>
     </div>
     <p id="feedbackStatus"></p>
+  </div>
+
+  <button id="settingsBtn" title="設定">⚙ 設定</button>
+  <div id="settingsPanel">
+    <h2>設定</h2>
+
+    <h3>プレイヤー名</h3>
+    <input type="text" id="playerNameInput" maxlength="16" placeholder="名無しさん">
+
+    <h3>キー操作</h3>
+    <div id="keyBindRows"></div>
+    <div class="menuButtons">
+      <button class="menuBtn secondary" id="keyConfigReset">キー設定を初期化</button>
+      <button class="menuBtn" id="settingsClose">閉じる</button>
+    </div>
   </div>
 
   <div class="panel" id="topleft">
@@ -270,7 +323,7 @@
 
   <div class="panel" id="bottomleft">
     <span id="matchupLabel"></span><br>
-    W/S ピッチ ・ A/D ロール ・ Q/E ヨー ・ R/F スロットル ・ Space エアブレーキ ・ Shift 敵機を見る
+    <span id="controlsHint"></span>
   </div>
 
   <div id="gunsFlash">GUNS!</div>
@@ -1500,23 +1553,77 @@ function stepPhysics(state, controls, dt, opponent) {
 // 7. プレイヤー入力
 // ================================================================
 const keys = {};
+
+// --- 7-1. キーコンフィグ：割り当ては localStorage に保存し、次回起動時も引き継ぐ ---
+const DEFAULT_KEY_BINDINGS = {
+  pitchUp: "w", pitchDown: "s", rollLeft: "a", rollRight: "d",
+  yawLeft: "q", yawRight: "e", throttleUp: "r", throttleDown: "f",
+  airbrake: " ", lookEnemy: "shift",
+};
+const KEY_BIND_LABELS = {
+  pitchUp: "機首上げ", pitchDown: "機首下げ", rollLeft: "ロール左", rollRight: "ロール右",
+  yawLeft: "ヨー左", yawRight: "ヨー右", throttleUp: "スロットル増", throttleDown: "スロットル減",
+  airbrake: "エアブレーキ", lookEnemy: "敵機を見る",
+};
+function loadKeyBindings() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem("dogfightKeyBindings") || "{}"); } catch {}
+  return Object.assign({}, DEFAULT_KEY_BINDINGS, saved);
+}
+function saveKeyBindings() {
+  try { localStorage.setItem("dogfightKeyBindings", JSON.stringify(keyBindings)); } catch {}
+}
+let keyBindings = loadKeyBindings();
+let awaitingKeyFor = null; // 現在キー入力待ちになっている操作名（null＝通常時）
+
+function formatKeyLabel(k) {
+  if (k === " ") return "Space";
+  if (k === "shift") return "Shift";
+  if (k === "arrowup") return "↑";
+  if (k === "arrowdown") return "↓";
+  if (k === "arrowleft") return "←";
+  if (k === "arrowright") return "→";
+  return k.length === 1 ? k.toUpperCase() : k;
+}
+function updateControlsHint() {
+  const el = document.getElementById("controlsHint");
+  if (!el) return;
+  const k = keyBindings;
+  el.textContent =
+    `${formatKeyLabel(k.pitchUp)}/${formatKeyLabel(k.pitchDown)} ピッチ ・ ` +
+    `${formatKeyLabel(k.rollLeft)}/${formatKeyLabel(k.rollRight)} ロール ・ ` +
+    `${formatKeyLabel(k.yawLeft)}/${formatKeyLabel(k.yawRight)} ヨー ・ ` +
+    `${formatKeyLabel(k.throttleUp)}/${formatKeyLabel(k.throttleDown)} スロットル ・ ` +
+    `${formatKeyLabel(k.airbrake)} エアブレーキ ・ ${formatKeyLabel(k.lookEnemy)} 敵機を見る`;
+}
+updateControlsHint();
+
 // テキスト入力欄（フィードバック欄・部屋コード欄など）にフォーカスがある間は、
 // タイプした文字が操縦入力として拾われてしまわないようにする
 function isTypingInField() {
   const el = document.activeElement;
   return !!el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT");
 }
-window.addEventListener("keydown", (e) => { if (!isTypingInField()) keys[e.key.toLowerCase()] = true; });
+window.addEventListener("keydown", (e) => {
+  if (awaitingKeyFor) {
+    e.preventDefault();
+    if (e.key !== "Escape") rebindAction(awaitingKeyFor, e.key.toLowerCase());
+    awaitingKeyFor = null;
+    renderKeyBindRows();
+    return;
+  }
+  if (!isTypingInField()) keys[e.key.toLowerCase()] = true;
+});
 window.addEventListener("keyup", (e) => { if (!isTypingInField()) keys[e.key.toLowerCase()] = false; });
 
 function readPlayerControls() {
   return {
-    elevator: (keys["s"] ? 1 : 0) - (keys["w"] ? 1 : 0),
-    aileron: (keys["d"] ? 1 : 0) - (keys["a"] ? 1 : 0),
-    rudder: (keys["e"] ? 1 : 0) - (keys["q"] ? 1 : 0),
-    throttleUp: !!keys["r"],
-    throttleDown: !!keys["f"],
-    airbrake: !!keys[" "],
+    elevator: (keys[keyBindings.pitchDown] ? 1 : 0) - (keys[keyBindings.pitchUp] ? 1 : 0),
+    aileron: (keys[keyBindings.rollRight] ? 1 : 0) - (keys[keyBindings.rollLeft] ? 1 : 0),
+    rudder: (keys[keyBindings.yawRight] ? 1 : 0) - (keys[keyBindings.yawLeft] ? 1 : 0),
+    throttleUp: !!keys[keyBindings.throttleUp],
+    throttleDown: !!keys[keyBindings.throttleDown],
+    airbrake: !!keys[keyBindings.airbrake],
   };
 }
 
@@ -1744,7 +1851,7 @@ function updateCamera(dt) {
   const targetDistFactor = THREE.MathUtils.clamp(0.6 + 0.4 * speedRatio, 0.6, 1.2);
   camDistFactor += (targetDistFactor - camDistFactor) * (1 - Math.exp(-dt * 2.5));
 
-  const shiftHeld = !!keys["shift"];
+  const shiftHeld = !!keys[keyBindings.lookEnemy];
   if (shiftHeld !== prevShiftHeld) {
     camTransitionTimer = 0.6; // 切り替わった直後の0.6秒間は高速レートで追従させる
     prevShiftHeld = shiftHeld;
@@ -2570,6 +2677,70 @@ const feedbackCloseHandler = () => {
 document.getElementById("feedbackClose").addEventListener("click", feedbackCloseHandler);
 feedbackTextEl.addEventListener("keydown", (e) => {
   if (e.key === "Escape") feedbackCloseHandler();
+});
+
+// --- 設定画面（プレイヤー名・キー操作） ---
+const settingsBtnEl = document.getElementById("settingsBtn");
+const settingsPanelEl = document.getElementById("settingsPanel");
+const keyBindRowsEl = document.getElementById("keyBindRows");
+const playerNameInputEl = document.getElementById("playerNameInput");
+
+function loadPlayerName() {
+  try { return localStorage.getItem("dogfightPlayerName") || ""; } catch { return ""; }
+}
+function savePlayerName(name) {
+  try { localStorage.setItem("dogfightPlayerName", name.trim().slice(0, 16)); } catch {}
+}
+playerNameInputEl.value = loadPlayerName();
+playerNameInputEl.addEventListener("change", () => savePlayerName(playerNameInputEl.value));
+
+function rebindAction(action, newKey) {
+  // 既に他の操作に割り当て済みのキーを選んだ場合は、元の割り当てと入れ替える
+  // （同じキーが2つの操作に重複しないようにするため）
+  const existingOwner = Object.keys(keyBindings).find((a) => a !== action && keyBindings[a] === newKey);
+  if (existingOwner) keyBindings[existingOwner] = keyBindings[action];
+  keyBindings[action] = newKey;
+  saveKeyBindings();
+}
+
+function renderKeyBindRows() {
+  keyBindRowsEl.innerHTML = "";
+  Object.keys(DEFAULT_KEY_BINDINGS).forEach((action) => {
+    const row = document.createElement("div");
+    row.className = "keyBindRow";
+    const waiting = awaitingKeyFor === action;
+    row.innerHTML =
+      `<span class="keyBindLabel">${KEY_BIND_LABELS[action]}</span>` +
+      `<span class="keyBindKey${waiting ? " waiting" : ""}" data-action="${action}">` +
+      `${waiting ? "キーを入力..." : formatKeyLabel(keyBindings[action])}</span>`;
+    keyBindRowsEl.appendChild(row);
+  });
+  keyBindRowsEl.querySelectorAll(".keyBindKey").forEach((el) => {
+    el.addEventListener("click", () => {
+      awaitingKeyFor = el.dataset.action;
+      renderKeyBindRows();
+    });
+  });
+  updateControlsHint();
+}
+
+settingsBtnEl.addEventListener("click", () => {
+  clearHeldKeys();
+  awaitingKeyFor = null;
+  renderKeyBindRows();
+  settingsPanelEl.classList.add("active");
+});
+
+const settingsCloseHandler = () => {
+  awaitingKeyFor = null;
+  savePlayerName(playerNameInputEl.value);
+  settingsPanelEl.classList.remove("active");
+};
+document.getElementById("settingsClose").addEventListener("click", settingsCloseHandler);
+document.getElementById("keyConfigReset").addEventListener("click", () => {
+  keyBindings = Object.assign({}, DEFAULT_KEY_BINDINGS);
+  saveKeyBindings();
+  renderKeyBindRows();
 });
 
 feedbackSendEl.addEventListener("click", () => {
