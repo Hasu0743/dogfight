@@ -133,6 +133,22 @@ function handleStatsLookup(req, res, url) {
   res.end(JSON.stringify(entry));
 }
 
+// ブラウザで直接このサーバーを開いた時にゲーム画面が見られるように、
+// index2_6dof.html だけをピンポイントで返す（フォルダ丸ごと配信はしない。
+// feedback.log や server.js 自体が外から見えてしまう事故を防ぐため）。
+const GAME_FILE = path.join(__dirname, "index2_6dof.html");
+function handleGamePage(req, res) {
+  fs.readFile(GAME_FILE, (err, data) => {
+    if (err) {
+      res.writeHead(500, CORS_HEADERS);
+      res.end("game file not found");
+      return;
+    }
+    res.writeHead(200, { ...CORS_HEADERS, "Content-Type": "text/html; charset=utf-8" });
+    res.end(data);
+  });
+}
+
 const httpServer = http.createServer((req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, CORS_HEADERS); // プリフライトリクエストへの応答
@@ -150,6 +166,10 @@ const httpServer = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (req.method === "GET" && url.pathname === "/stats") {
     handleStatsLookup(req, res, url);
+    return;
+  }
+  if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index2_6dof.html")) {
+    handleGamePage(req, res);
     return;
   }
   res.writeHead(404, CORS_HEADERS);
