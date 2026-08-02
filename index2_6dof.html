@@ -142,6 +142,7 @@
   .menuNote { color: #ffd166; font-size: 13px; min-height: 1.4em; white-space: pre-line; }
   .downloadNote { color: #7fd6a8; font-size: 12px; margin-top: 4px; }
   .downloadNote a { color: #06d6a0; }
+  .tipDisplay { margin-top: 18px; color: #6a8; font-size: 12px; min-height: 1.4em; }
 
   /* メニュー画面限定のサイド広告（HUDパネルと被らないよう上下にマージンを確保） */
   .sideAd {
@@ -488,6 +489,8 @@
         <button class="menuBtn secondary" id="btnToMenu">メニューに戻る</button>
       </div>
     </div>
+
+    <p id="tipDisplay" class="tipDisplay"></p>
   </div>
 </div>
 
@@ -2300,6 +2303,13 @@ let aiStage = "player";       // "player" | "enemy"（1人プレイの選択ス�
 let aiPlayerChoice = null;
 let matchCategory = null;     // "jet" | "prop"（この対戦全体で使う機体カテゴリ）
 let pendingOnlineAction = null; // カテゴリ選択後に何をするか："random" | "create"（"join"はカテゴリ選択を挟まない）
+let queuedForRandomMatch = false; // ランダムマッチのキューに繋いだまま、見つかるまでAIと練習している状態か
+let waitingAircraftChoice = null; // その練習で使っている（＝マッチ成立時にそのまま本番へ送る）自機の機体
+
+function randomAircraftFromCategory(category) {
+  const keys = Object.keys(AIRCRAFT_DB).filter((k) => AIRCRAFT_DB[k].category === category);
+  return keys[Math.floor(Math.random() * keys.length)];
+}
 
 // --- 14-2b. カテゴリ選択（ジェット/レシプロ）---
 const categorySelectNoteEl = document.getElementById("categorySelectNote");
@@ -2314,13 +2324,20 @@ function onCategoryChosen(category) {
   if (mode === "ai") {
     startAircraftSelectForPlayer();
   } else if (mode === "online") {
-    waitingTextEl.textContent = "接続しています…";
-    showScreen("waiting");
     if (pendingOnlineAction === "random") {
+      // 見つかるまでの間もAIと練習できるように、先にキュー接続だけ済ませておき、
+      // 画面自体はAIモードと同じ「自機を選ぶ」フローに乗せる（敵機はランダムで即開戦）。
+      queuedForRandomMatch = true;
       connectWS({ type: "queue_random", category }).catch((e) => {
+        queuedForRandomMatch = false;
         returnToMenu("接続に失敗しました: " + e.message);
       });
+      mode = "ai";
+      aiStage = "player";
+      showAircraftSelect("対戦相手を探しています…自分の機体を選ぶと、見つかるまでAIと練習できます。");
     } else if (pendingOnlineAction === "create") {
+      waitingTextEl.textContent = "接続しています…";
+      showScreen("waiting");
       connectWS({ type: "create_room", category }).catch((e) => {
         returnToMenu("接続に失敗しました: " + e.message);
       });
@@ -2362,6 +2379,14 @@ function onAircraftCardClick(key) {
   if (mode === "ai") {
     if (aiStage === "player") {
       aiPlayerChoice = key;
+      if (queuedForRandomMatch) {
+        waitingAircraftChoice = key;
+        resetGame(aiPlayerChoice, randomAircraftFromCategory(matchCategory));
+        running = true;
+        lastTime = performance.now();
+        hideCenterMessage();
+        return;
+      }
       aiStage = "enemy";
       showAircraftSelect("対戦する敵機（AI操縦）を選んでください。");
     } else {
@@ -2555,6 +2580,8 @@ function leaveOnlineMatch() {
     ws = null;
   }
   chatBoxEl.classList.remove("active");
+  queuedForRandomMatch = false;
+  waitingAircraftChoice = null;
 }
 
 function handleServerDisconnect() {
@@ -2580,14 +2607,31 @@ function handleServerMessage(msg) {
       joinRoomNoteEl.textContent = msg.message || "参加に失敗しました。";
       if (ws) { ws.close(); ws = null; }
       break;
-    case "matched":
+    case "matched": {
       onlineSide = msg.side;
       matchCategory = msg.category === "prop" ? "prop" : "jet"; // 部屋作成者/ランダムマッチのキューが決めたカテゴリをサーバーから受け取る
-      myAircraftChoice = null;
       opponentAircraftChoice = null;
       opponentName = null;
-      showAircraftSelect("対戦相手が見つかりました！機体を選んでください。");
+      // ランダムマッチ待機中はAIモード(mode==="ai")として振る舞っているので、
+      // マッチが成立した時点で必ずオンラインモードへ切り替える
+      // （まだ練習機体を選んでいなかった場合も含め、ここで確実に戻す）。
+      const hadWaitingChoice = queuedForRandomMatch && waitingAircraftChoice;
+      queuedForRandomMatch = false;
+      mode = "online";
+      running = false;
+      if (hadWaitingChoice) {
+        // 待機中のAI練習を即座に打ち切り、練習に使っていた機体でそのまま本番へ
+        myAircraftChoice = waitingAircraftChoice;
+        sendNet({ type: "select_aircraft", aircraft: myAircraftChoice, name: loadPlayerName() || "名無しさん" });
+        waitingTextEl.textContent =
+          `対戦相手が見つかりました！自分の機体（${AIRCRAFT_DB[myAircraftChoice].label}）を送信しました。相手の準備を待っています…`;
+        showScreen("waiting");
+      } else {
+        myAircraftChoice = null;
+        showAircraftSelect("対戦相手が見つかりました！機体を選んでください。");
+      }
       break;
+    }
     case "opponent_selected":
       opponentAircraftChoice = msg.aircraft;
       opponentName = msg.name || null;
@@ -2748,8 +2792,8 @@ document.getElementById("btnSelectBack").addEventListener("click", () => {
     startAircraftSelectForPlayer();
     return;
   }
-  if (mode === "ai" && aiStage === "player") {
-    // 自機選択中の「戻る」はカテゴリ選択に戻る
+  if (mode === "ai" && aiStage === "player" && !queuedForRandomMatch) {
+    // 自機選択中の「戻る」はカテゴリ選択に戻る（ランダムマッチ待機中はキュー解除のためメニューに戻す）
     showCategorySelect();
     return;
   }
@@ -2841,6 +2885,25 @@ function fetchAndShowRank() {
     .then((entry) => renderRankDisplay(entry))
     .catch(() => { rankDisplayEl.textContent = "サーバーに接続できませんでした"; });
 }
+// --- Tips表示：メニュー系画面（center-message表示中）に共通で出す豆知識のローテーション ---
+const GAMEPLAY_TIPS = [
+  "低速・近距離の格闘戦に入ると、コンバットフラップやコブラ機動が自動的に発動する機体があります。",
+  "敵機を見るキー（既定はShift）を押すと、常に敵機の方を向くカメラに切り替わります。",
+  "旋回中にスロットルを絞ると旋回半径は小さくなりますが、粘りすぎるとエネルギーを失って不利になります。",
+  "高高度に行くほど空気が薄くなり、揚力も推力（ジェット機）も弱くなります。",
+  "超音速域では空力抵抗が急激に増えるので、高高度での一撃離脱は加速だけに頼ると息切れします。",
+  "設定画面（⚙）ではキー操作の変更・プレイヤー名の設定・戦績の確認ができます。",
+  "オンライン対戦中はTキー（既定）でチャット欄を開けます。",
+];
+let tipIndex = 0;
+const tipDisplayEl = document.getElementById("tipDisplay");
+function rotateTip() {
+  tipDisplayEl.textContent = "Tips: " + GAMEPLAY_TIPS[tipIndex % GAMEPLAY_TIPS.length];
+  tipIndex++;
+}
+rotateTip();
+setInterval(rotateTip, 8000);
+
 // --- お知らせポップアップ：起動時に一度だけサーバーに確認し、前回見たものと違えば表示する ---
 const announcementPanelEl = document.getElementById("announcementPanel");
 const announcementMessageEl = document.getElementById("announcementMessage");
