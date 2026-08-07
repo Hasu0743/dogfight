@@ -33,6 +33,8 @@ const FEEDBACK_MAX_LEN = 4000; // 1件あたりの本文の最大文字数（荒
 const STATS_FILE = path.join(__dirname, "stats.json");
 const NAME_MAX_LEN = 16;
 const CHAT_MAX_LEN = 200;
+const LOBBY_HISTORY_MAX = 30;        // 入室した人に見せる直近ログの件数
+const LOBBY_CHAT_INTERVAL_MS = 1500; // 連投（荒らし・誤爆）を防ぐ1人あたりの最短送信間隔
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*", // file:// で開いたクライアントからも送れるようにする
@@ -204,11 +206,26 @@ function normalizeCategory(c) {
   return CATEGORIES.includes(c) ? c : "jet";
 }
 
-let randomQueue = { jet: [], prop: [] }; // カテゴリ別・対戦相手を待っているソケットのFIFOキュー
-const pendingRooms = new Map();  // 部屋コード -> { ws, category }（フレンドの入室を待っている情報）
+// チームあたりの人数。1 なら従来の1対1、4 なら4対4。
+const TEAM_SIZES = [1, 4];
+function normalizeTeamSize(n) {
+  return TEAM_SIZES.includes(n) ? n : 1;
+}
+const MAX_PER_TEAM = 4;
+
+// ランダムマッチのキュー："<category>:<teamSize>" -> 待っているソケットのFIFO
+const randomQueues = new Map();
+function queueKey(category, size) {
+  return `${category}:${size}`;
+}
+
+const rooms = new Map();         // roomId -> room
+const pendingRooms = new Map();  // 部屋コード -> room（コードで参加できる部屋）
 
 const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 紛らわしい I/O/0/1 を除外
 const ROOM_CODE_LEN = 4;
+let nextRoomId = 1;
+let nextPlayerId = 1;
 
 function send(ws, msg) {
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -226,47 +243,218 @@ function makeRoomCode() {
   return code;
 }
 
-function removeFromQueue(ws) {
-  for (const cat of CATEGORIES) {
-    randomQueue[cat] = randomQueue[cat].filter((s) => s !== ws);
-  }
+// ================================================================
+// 部屋：1対1も4対4も「2チームからなる部屋」という同じ形で扱う。
+// サーバーは誰がどのチームかと、機体選択・撃墜・決着の進行だけを見る
+// （飛行物理と命中判定は今まで通り各クライアントが計算する）。
+// ================================================================
+function createRoom(category, teamSize, code) {
+  const room = {
+    id: nextRoomId++,
+    code: code || null,
+    category: normalizeCategory(category),
+    teamSize: normalizeTeamSize(teamSize),
+    members: [],       // ws の配列
+    hostId: null,      // ws.playerId
+    phase: "lobby",    // "lobby" | "select" | "playing"
+  };
+  rooms.set(room.id, room);
+  return room;
 }
 
-function removePendingRoomsFor(ws) {
-  for (const [code, waiting] of pendingRooms) {
-    if (waiting.ws === ws) pendingRooms.delete(code);
-  }
+function roomOf(ws) {
+  return ws.roomId ? rooms.get(ws.roomId) || null : null;
 }
 
-// 2人を組ませて対戦成立させる（以後はこの2ソケット間でメッセージを中継する）
-function pairUp(a, b, category) {
-  a.opponent = b;
-  b.opponent = a;
-  a.myAircraft = null;
-  b.myAircraft = null;
-  a.wantsRematch = false;
-  b.wantsRematch = false;
-  send(a, { type: "matched", side: "A", category });
-  send(b, { type: "matched", side: "B", category });
+function teamCount(room, team) {
+  return room.members.filter((m) => m.team === team).length;
 }
 
-// 対戦が終わった/切断された時に、お互いの opponent 参照を解消する
-function unpair(ws) {
-  const opp = ws.opponent;
-  ws.opponent = null;
-  ws.myAircraft = null;
+function addToRoom(room, ws, team) {
+  ws.roomId = room.id;
+  ws.playerId = ws.playerId || `p${nextPlayerId++}`;
+  ws.team = team || (teamCount(room, "A") <= teamCount(room, "B") ? "A" : "B");
+  ws.aircraft = null;
+  ws.alive = true;
   ws.wantsRematch = false;
-  if (opp) {
-    opp.opponent = null;
-    send(opp, { type: "opponent_left" });
+  room.members.push(ws);
+  if (!room.hostId) room.hostId = ws.playerId;
+}
+
+function removeFromRoom(ws) {
+  const room = roomOf(ws);
+  ws.roomId = null;
+  if (!room) return null;
+  room.members = room.members.filter((m) => m !== ws);
+  if (room.code && room.members.length === 0) pendingRooms.delete(room.code);
+  if (room.members.length === 0) {
+    rooms.delete(room.id);
+    return null;
   }
+  if (room.hostId === ws.playerId) room.hostId = room.members[0].playerId; // ホストが抜けたら次の人へ
+  return room;
+}
+
+function rosterOf(room) {
+  return room.members.map((m) => ({
+    id: m.playerId,
+    name: m.name || "名無しさん",
+    team: m.team,
+    aircraft: m.aircraft || null,
+    alive: m.alive,
+  }));
+}
+
+function broadcastRoom(room, msg, except) {
+  for (const m of room.members) {
+    if (m !== except) send(m, msg);
+  }
+}
+
+function sendRoomUpdate(room) {
+  const players = rosterOf(room);
+  for (const m of room.members) {
+    send(m, {
+      type: "room_update",
+      you: m.playerId,
+      host: room.hostId,
+      code: room.code,
+      category: room.category,
+      teamSize: room.teamSize,
+      players,
+    });
+  }
+}
+
+// 部屋のメンバーを確定させ、機体選択フェーズに入る
+function beginSelect(room) {
+  room.phase = "select";
+  room.members.forEach((m) => { m.aircraft = null; m.alive = true; m.wantsRematch = false; });
+  const players = rosterOf(room);
+  for (const m of room.members) {
+    send(m, { type: "match_ready", you: m.playerId, category: room.category, players });
+  }
+}
+
+// 全員が機体を選んだら開戦
+function startIfAllSelected(room) {
+  if (room.phase !== "select") return;
+  if (!room.members.every((m) => m.aircraft)) return;
+  room.phase = "playing";
+  broadcastRoom(room, { type: "start", players: rosterOf(room) });
+}
+
+// 生き残っているチームが1つだけになったら決着
+function checkMatchOver(room, reason) {
+  if (room.phase !== "playing") return;
+  const aliveTeams = ["A", "B"].filter((t) => room.members.some((m) => m.team === t && m.alive));
+  if (aliveTeams.length > 1) return;
+  room.phase = "lobby";
+  broadcastRoom(room, {
+    type: "match_over",
+    winTeam: aliveTeams[0] || null,
+    reason: reason || (aliveTeams.length === 0 ? "相打ちになりました。" : undefined),
+  });
+}
+
+function removeFromQueues(ws) {
+  for (const [key, q] of randomQueues) {
+    const filtered = q.filter((s) => s !== ws);
+    if (filtered.length === 0) randomQueues.delete(key);
+    else randomQueues.set(key, filtered);
+  }
+}
+
+// キューに必要人数（teamSize×2）が溜まったら部屋を作って開始する
+function tryFormRandomMatch(category, size) {
+  const key = queueKey(category, size);
+  const q = randomQueues.get(key) || [];
+  const needed = size * 2;
+  while (q.length >= needed) {
+    const picked = q.splice(0, needed);
+    const room = createRoom(category, size, null);
+    picked.forEach((ws, i) => addToRoom(room, ws, i % 2 === 0 ? "A" : "B"));
+    beginSelect(room);
+  }
+  if (q.length === 0) randomQueues.delete(key);
+  else randomQueues.set(key, q);
+}
+
+function notifyQueueProgress(category, size) {
+  const q = randomQueues.get(queueKey(category, size)) || [];
+  for (const ws of q) send(ws, { type: "queued", size, count: q.length });
+}
+
+// 対戦から抜ける／切断されたときの後始末。残ったメンバーには誰が抜けたかを伝え、
+// それで決着がついたなら勝敗も配信する。
+function closeRoom(room, message) {
+  broadcastRoom(room, { type: "room_closed", message });
+  room.members.forEach((m) => { m.roomId = null; });
+  if (room.code) pendingRooms.delete(room.code);
+  rooms.delete(room.id);
+}
+
+function leaveRoom(ws) {
+  const room = roomOf(ws);
+  if (!room) return;
+  const phase = room.phase;
+  const leftId = ws.playerId;
+  const remaining = removeFromRoom(ws);
+  if (!remaining) return; // 最後の1人が抜けた＝部屋ごと消滅済み
+
+  if (phase === "playing") {
+    // 対戦中の退出は撃墜と同じ扱い。それで片方のチームが全滅すれば決着する。
+    broadcastRoom(remaining, { type: "player_left", id: leftId });
+    checkMatchOver(remaining, "参加者が退出したため対戦終了です。");
+  } else if (phase === "select") {
+    // 機体選択中に抜けられると全員が待ち続けてしまうので、その回は中止する
+    closeRoom(remaining, "参加者が退出したため、対戦の準備を中止しました。");
+  } else {
+    // 待合室では、残った人はそのまま待てる
+    sendRoomUpdate(remaining);
+  }
+}
+
+// --- グローバルチャット（ロビー）---
+// 対戦の中継とは別系統の仕組み。メニュー画面を開いているクライアントが lobby_join で
+// 参加し、発言は参加者全員へ配信する。対戦マッチングとは無関係なので、
+// ここに入っていること／出ることが対戦の成立に影響することはない。
+const lobby = new Set();
+let lobbyHistory = []; // 直近 LOBBY_HISTORY_MAX 件の { name, text }
+
+function broadcastLobby(msg, except) {
+  for (const sock of lobby) {
+    if (sock !== except) send(sock, msg);
+  }
+}
+
+function broadcastLobbyCount() {
+  broadcastLobby({ type: "lobby_count", count: lobby.size });
+}
+
+// --- フレンド（オンライン状況と招待）---
+// アカウント認証は無く、名前は完全な自己申告。したがってこれは「同じ名前を名乗っている人が
+// 今ロビーに居るか」を見せているに過ぎず、なりすましは防げない。招待で渡るのも
+// ルームコードだけなので、悪用されても部屋が荒れる以上のことは起きない、という前提の設計。
+const INVITE_INTERVAL_MS = 3000; // 招待の連打防止
+
+function lobbyNames() {
+  const names = new Set();
+  for (const sock of lobby) {
+    if (sock.lobbyName) names.add(sock.lobbyName);
+  }
+  return [...names];
+}
+
+function broadcastLobbyNames() {
+  broadcastLobby({ type: "lobby_names", names: lobbyNames() });
 }
 
 wss.on("connection", (ws) => {
   ws.isAlive = true;
-  ws.opponent = null;
-  ws.myAircraft = null;
-  ws.wantsRematch = false;
+  ws.roomId = null;
+  ws.playerId = null;
+  ws.name = null;
 
   ws.on("pong", () => { ws.isAlive = true; });
 
@@ -280,102 +468,197 @@ wss.on("connection", (ws) => {
 
     switch (msg.type) {
       case "queue_random": {
-        removeFromQueue(ws);
-        removePendingRoomsFor(ws);
+        removeFromQueues(ws);
+        leaveRoom(ws);
         const category = normalizeCategory(msg.category);
-        randomQueue[category].push(ws);
-        send(ws, { type: "queued" });
-        if (randomQueue[category].length >= 2) {
-          const a = randomQueue[category].shift();
-          const b = randomQueue[category].shift();
-          pairUp(a, b, category);
-        }
+        const size = normalizeTeamSize(msg.size);
+        ws.name = normalizeName(msg.name);
+        ws.queueCategory = category;
+        ws.queueSize = size;
+        const key = queueKey(category, size);
+        const q = randomQueues.get(key) || [];
+        q.push(ws);
+        randomQueues.set(key, q);
+        notifyQueueProgress(category, size);
+        tryFormRandomMatch(category, size);
         break;
       }
 
       case "create_room": {
-        removeFromQueue(ws);
-        removePendingRoomsFor(ws);
+        removeFromQueues(ws);
+        leaveRoom(ws);
         const code = makeRoomCode();
-        const category = normalizeCategory(msg.category);
-        pendingRooms.set(code, { ws, category });
+        const room = createRoom(msg.category, msg.size, code);
+        pendingRooms.set(code, room);
+        addToRoom(room, ws, "A");
+        ws.name = normalizeName(msg.name);
         send(ws, { type: "room_created", code });
+        sendRoomUpdate(room);
         break;
       }
 
       case "join_room": {
-        removeFromQueue(ws);
+        removeFromQueues(ws);
         const code = String(msg.code || "").trim().toUpperCase().slice(0, ROOM_CODE_LEN);
-        const waiting = pendingRooms.get(code);
-        if (!waiting || waiting.ws === ws || waiting.ws.readyState !== WebSocket.OPEN) {
+        const room = pendingRooms.get(code);
+        if (!room || room.phase !== "lobby" || roomOf(ws) === room) {
           send(ws, { type: "room_error", message: "そのコードの部屋は見つかりませんでした。" });
           break;
         }
-        pendingRooms.delete(code);
-        pairUp(waiting.ws, ws, waiting.category);
+        if (room.members.length >= MAX_PER_TEAM * 2) {
+          send(ws, { type: "room_error", message: "その部屋は満員です。" });
+          break;
+        }
+        leaveRoom(ws);
+        addToRoom(room, ws, null); // 少ない方のチームへ自動で割り振る
+        ws.name = normalizeName(msg.name);
+        sendRoomUpdate(room);
+        break;
+      }
+
+      case "switch_team": {
+        const room = roomOf(ws);
+        if (!room || room.phase !== "lobby") break;
+        const to = ws.team === "A" ? "B" : "A";
+        if (teamCount(room, to) >= MAX_PER_TEAM) break; // 定員オーバーのチームには移れない
+        ws.team = to;
+        sendRoomUpdate(room);
+        break;
+      }
+
+      case "room_start": {
+        const room = roomOf(ws);
+        if (!room || room.phase !== "lobby") break;
+        if (room.hostId !== ws.playerId) break; // 開始できるのはホストだけ
+        if (!["A", "B"].every((t) => teamCount(room, t) > 0)) break;
+        if (room.code) pendingRooms.delete(room.code); // 開始後は途中参加させない
+        beginSelect(room);
         break;
       }
 
       case "cancel": {
-        removeFromQueue(ws);
-        removePendingRoomsFor(ws);
+        removeFromQueues(ws);
+        leaveRoom(ws);
         break;
       }
 
       case "select_aircraft": {
-        if (!ws.opponent) break;
-        ws.myAircraft = msg.aircraft;
-        send(ws.opponent, { type: "opponent_selected", aircraft: msg.aircraft, name: normalizeName(msg.name) });
-        if (ws.opponent.myAircraft) {
-          send(ws, { type: "start" });
-          send(ws.opponent, { type: "start" });
-        }
+        const room = roomOf(ws);
+        if (!room) break;
+        ws.aircraft = msg.aircraft;
+        ws.name = normalizeName(msg.name);
+        broadcastRoom(room, { type: "roster_update", players: rosterOf(room) });
+        startIfAllSelected(room);
         break;
       }
 
       case "state": {
-        if (ws.opponent) send(ws.opponent, { type: "state", data: msg.data });
+        const room = roomOf(ws);
+        if (!room) break;
+        // 自分の状態を、同じ部屋の他の全員へそのまま中継する
+        broadcastRoom(room, { type: "state", id: ws.playerId, data: msg.data }, ws);
         break;
       }
 
       case "i_died": {
-        if (ws.opponent) send(ws.opponent, { type: "opponent_died" });
+        const room = roomOf(ws);
+        if (!room || !ws.alive) break;
+        ws.alive = false;
+        broadcastRoom(room, { type: "player_died", id: ws.playerId }, ws);
+        checkMatchOver(room);
         break;
       }
 
       case "chat": {
-        if (!ws.opponent) break;
+        const room = roomOf(ws);
+        if (!room) break;
         const text = String(msg.text || "").slice(0, CHAT_MAX_LEN).trim();
         if (!text) break;
-        send(ws.opponent, { type: "chat", name: normalizeName(msg.name), text });
+        broadcastRoom(room, { type: "chat", name: normalizeName(msg.name), text }, ws);
+        break;
+      }
+
+      case "lobby_join": {
+        lobby.add(ws);
+        ws.lobbyName = normalizeName(msg.name);
+        send(ws, {
+          type: "lobby_history",
+          messages: lobbyHistory,
+          count: lobby.size,
+          names: lobbyNames(),
+        });
+        broadcastLobbyCount();
+        broadcastLobbyNames();
+        break;
+      }
+
+      case "lobby_rename": {
+        if (!lobby.has(ws)) break;
+        ws.lobbyName = normalizeName(msg.name);
+        broadcastLobbyNames();
+        break;
+      }
+
+      case "friend_invite": {
+        if (!lobby.has(ws)) break;
+        const now = Date.now();
+        if (ws.lastInviteAt && now - ws.lastInviteAt < INVITE_INTERVAL_MS) break;
+        const to = normalizeName(msg.to);
+        const code = String(msg.code || "").trim().toUpperCase().slice(0, ROOM_CODE_LEN);
+        if (!code) break;
+        ws.lastInviteAt = now;
+        // 同じ名前を名乗っている人全員に届く（誰が本物かはサーバーには分からない）
+        for (const sock of lobby) {
+          if (sock !== ws && sock.lobbyName === to) {
+            send(sock, { type: "friend_invited", from: ws.lobbyName, code });
+          }
+        }
+        break;
+      }
+
+      case "lobby_leave": {
+        if (lobby.delete(ws)) { broadcastLobbyCount(); broadcastLobbyNames(); }
+        break;
+      }
+
+      case "lobby_chat": {
+        if (!lobby.has(ws)) break; // 参加していないソケットからの発言は無視する
+        const now = Date.now();
+        if (ws.lastLobbyChatAt && now - ws.lastLobbyChatAt < LOBBY_CHAT_INTERVAL_MS) break;
+        const text = String(msg.text || "").slice(0, CHAT_MAX_LEN).trim();
+        if (!text) break;
+        ws.lastLobbyChatAt = now;
+        const entry = { name: normalizeName(msg.name), text };
+        lobbyHistory.push(entry);
+        if (lobbyHistory.length > LOBBY_HISTORY_MAX) lobbyHistory = lobbyHistory.slice(-LOBBY_HISTORY_MAX);
+        // 送信者の画面には自分の発言を即座に出しているので、ここでは本人以外へ配る
+        broadcastLobby({ type: "lobby_chat", name: entry.name, text: entry.text }, ws);
         break;
       }
 
       case "rematch": {
-        if (!ws.opponent) break;
+        const room = roomOf(ws);
+        if (!room) break;
         ws.wantsRematch = true;
-        if (ws.opponent.wantsRematch) {
-          ws.myAircraft = null;
-          ws.opponent.myAircraft = null;
-          ws.wantsRematch = false;
-          ws.opponent.wantsRematch = false;
-          send(ws, { type: "rematch_ready" });
-          send(ws.opponent, { type: "rematch_ready" });
+        if (room.members.every((m) => m.wantsRematch)) {
+          room.phase = "select";
+          room.members.forEach((m) => { m.aircraft = null; m.alive = true; m.wantsRematch = false; });
+          broadcastRoom(room, { type: "rematch_ready", players: rosterOf(room) });
         }
         break;
       }
 
       case "leave_match": {
-        unpair(ws);
+        leaveRoom(ws);
         break;
       }
     }
   });
 
   ws.on("close", () => {
-    removeFromQueue(ws);
-    removePendingRoomsFor(ws);
-    unpair(ws);
+    removeFromQueues(ws);
+    leaveRoom(ws);
+    if (lobby.delete(ws)) { broadcastLobbyCount(); broadcastLobbyNames(); }
   });
 });
 

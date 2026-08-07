@@ -37,14 +37,8 @@
   .label { font-size: 11px; color: #9fd6b0; letter-spacing: 1px; margin-top: 2px; }
 
   /* ============================================================
-     2. 被弾/照準ゲージ・GUNS!フラッシュ
+     2. GUNS!フラッシュ
      ============================================================ */
-  #bottomright { bottom: 14px; right: 14px; width: 220px; }
-  .meterWrap { margin-top: 6px; }
-  .meterBar { height: 10px; width: 100%; background: #333; border: 1px solid #555; border-radius: 4px; overflow: hidden; }
-  .meterFill { height: 100%; width: 0%; transition: width 0.1s linear; }
-  #playerMeterFill { background: linear-gradient(90deg,#ffd166,#ef476f); }
-  #enemyMeterFill { background: linear-gradient(90deg,#8ce99a,#06d6a0); }
   #gunsFlash {
     position: absolute; top: 44%; left: 50%; transform: translate(-50%, -50%);
     font-size: 34px; font-weight: bold; color: #ff3b3b; text-shadow: 0 0 12px #ff0000;
@@ -125,7 +119,7 @@
   #center-message {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
     text-align: center; pointer-events: auto;
-    width: min(560px, 92vw); max-height: 88vh; overflow-y: auto;
+    width: min(560px, 92vw); max-height: 92vh; overflow-y: auto;
     padding: 4px 8px;
   }
   #center-message h1 { font-size: 28px; margin: 0 0 10px; }
@@ -142,7 +136,17 @@
   .menuNote { color: #ffd166; font-size: 13px; min-height: 1.4em; white-space: pre-line; }
   .downloadNote { color: #7fd6a8; font-size: 12px; margin-top: 4px; }
   .downloadNote a { color: #06d6a0; }
-  .tipDisplay { margin-top: 18px; color: #6a8; font-size: 12px; min-height: 1.4em; }
+  .tipDisplay { margin-top: 10px; color: #6a8; font-size: 12px; min-height: 1.4em; }
+
+  /* 縦に短い画面（ノートPCの1366x768など）では、メニューが画面からはみ出さないよう詰める。
+     ボタン・ダウンロードリンク・グローバルチャットまでを画面内に収めるのが狙い。 */
+  @media (max-height: 800px) {
+    .menuButtons { gap: 6px; margin-top: 10px; }
+    .menuBtn { padding: 8px 26px; font-size: 15px; }
+    .serverRow { margin-top: 10px; }
+    #lobbyChatLog { height: 56px; }
+    .tipDisplay { margin-top: 6px; }
+  }
 
   /* メニュー画面限定のサイド広告（HUDパネルと被らないよう上下にマージンを確保） */
   .sideAd {
@@ -265,6 +269,88 @@
   }
   #chatInput:focus { border-color: #06d6a0; }
 
+  /* グローバルチャット（トップメニュー画面のみ。#screenMenu の中にあるので表示切替は不要） */
+  #lobbyChat { margin-top: 10px; text-align: left; }
+  .lobbyChatHeader {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 12px; color: #9fd6b0; margin-bottom: 4px;
+  }
+  #lobbyChatStatus { color: #6a8; }
+  #lobbyChatLog {
+    height: clamp(56px, 9vh, 100px); overflow-y: auto;
+    background: rgba(10,16,20,0.6); border-radius: 6px; padding: 6px 8px;
+    font-size: 12px; line-height: 1.5; word-break: break-word;
+  }
+  #lobbyChatLog .lobbySelf { color: #9fd6b0; }
+  #lobbyChatLog .lobbyOther { color: #ffd166; }
+  #lobbyChatLog .lobbySystem { color: #6a8; }
+  #lobbyChatInput {
+    width: 100%; box-sizing: border-box; margin-top: 4px; padding: 6px 10px; border-radius: 6px;
+    background: rgba(11,22,32,0.8); color: #eafff0; border: 1px solid #567; font-size: 12px;
+  }
+  #lobbyChatInput:focus { border-color: #06d6a0; }
+  #lobbyChatInput:disabled { opacity: 0.5; }
+
+  /* ルーム（フレンド戦の待合室）とチーム表示 */
+  #roomTeams { display: flex; gap: 10px; margin-top: 12px; text-align: left; }
+  .roomTeam {
+    flex: 1; border: 1px solid #345; border-radius: 8px; padding: 8px 10px;
+    background: rgba(255,255,255,0.04);
+  }
+  .roomTeam h2 { margin: 0 0 6px; font-size: 13px; letter-spacing: 1px; }
+  .roomTeam.teamA h2 { color: #06d6a0; }
+  .roomTeam.teamB h2 { color: #ffd166; }
+  .roomTeam ul { list-style: none; margin: 0; padding: 0; font-size: 13px; line-height: 1.8; min-height: 3.6em; }
+  .roomTeam li.self { color: #fff; font-weight: bold; }
+  .roomTeam li .hostMark { color: #ffd166; font-size: 11px; }
+  .roomTeam li .emptySlot { color: #567; }
+  #roomCodeDisplay { color: #ffd166; letter-spacing: 6px; }
+
+  /* フレンド一覧（設定パネル内） */
+  .friendNote { color: #6a8; font-size: 11px; line-height: 1.6; margin: 0 0 8px; }
+  .friendAddRow { display: flex; gap: 6px; margin-bottom: 8px; }
+  .friendAddRow input {
+    flex: 1; padding: 6px 10px; border-radius: 4px; border: 1px solid #567;
+    background: #0b1620; color: #eafff0; font-size: 13px;
+  }
+  .friendAddRow .menuBtn { padding: 6px 14px; font-size: 13px; }
+  .friendRow {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0; border-bottom: 1px solid #234; font-size: 13px;
+  }
+  .friendRow .friendName { flex: 1; }
+  .friendRow .friendState { font-size: 11px; }
+  .friendRow.online .friendState { color: #06d6a0; }
+  .friendRow.offline .friendName { color: #89a; }
+  .friendRow.offline .friendState { color: #567; }
+  .friendRow button {
+    background: #3a4750; border: none; border-radius: 4px; color: #eafff0;
+    font-size: 11px; padding: 4px 8px; cursor: pointer;
+  }
+  .friendRow button.inviteBtn { background: #06d6a0; color: #012; font-weight: bold; }
+  .friendRow button:disabled { opacity: 0.4; cursor: default; }
+
+  /* 招待ポップアップ */
+  #invitePanel {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    pointer-events: auto; display: none; z-index: 1300;
+    width: min(380px, 88vw); background: rgba(10,16,20,0.97); border: 1px solid #06d6a0;
+    border-radius: 10px; padding: 18px; text-align: center;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+  }
+  #invitePanel.active { display: block; }
+  #invitePanel h2 { margin: 0 0 10px; font-size: 15px; color: #06d6a0; }
+  #inviteMessage { font-size: 14px; line-height: 1.6; margin: 0 0 6px; }
+
+  /* 撃墜後の観戦中バナー */
+  #spectateNotice {
+    position: absolute; top: 12%; left: 50%; transform: translateX(-50%);
+    display: none; z-index: 500; text-align: center;
+    background: rgba(10,16,20,0.75); border: 1px solid #ef476f; border-radius: 8px;
+    padding: 8px 16px; color: #ef476f; font-size: 14px; font-weight: bold;
+  }
+  #spectateNotice small { display: block; color: #cde; font-weight: normal; font-size: 11px; margin-top: 2px; }
+
   /* ============================================================
      11. お知らせポップアップ
      ============================================================ */
@@ -314,6 +400,15 @@
     </div>
   </div>
 
+  <div id="invitePanel">
+    <h2>ルームへの招待</h2>
+    <p id="inviteMessage"></p>
+    <div class="menuButtons">
+      <button class="menuBtn" id="inviteAccept">参加する</button>
+      <button class="menuBtn secondary" id="inviteDecline">断る</button>
+    </div>
+  </div>
+
   <button id="settingsBtn" title="設定">⚙ 設定</button>
   <div id="settingsPanel">
     <h2>設定</h2>
@@ -323,6 +418,17 @@
 
     <h3>戦績（オンライン対戦のみ集計）</h3>
     <p id="rankDisplay">未対戦</p>
+
+    <h3>フレンド</h3>
+    <p class="friendNote">
+      名前を登録すると、その人がメニュー画面を開いているかどうかが分かります。
+      アカウントの仕組みは無いので、同じ名前を名乗っている人が居ればその人として表示されます。
+    </p>
+    <div class="friendAddRow">
+      <input type="text" id="friendNameInput" maxlength="16" placeholder="フレンドのプレイヤー名">
+      <button class="menuBtn" id="friendAddBtn">追加</button>
+    </div>
+    <div id="friendList"></div>
 
     <h3>キー操作</h3>
     <div id="keyBindRows"></div>
@@ -364,13 +470,6 @@
     <div class="big"><span id="eturnrate">0</span>&deg;/s</div>
   </div>
 
-  <div class="panel" id="bottomright">
-    <div class="label">被弾ゲージ (自機)</div>
-    <div class="meterBar"><div id="playerMeterFill" class="meterFill"></div></div>
-    <div class="label" style="margin-top:8px;">照準ゲージ (敵機)</div>
-    <div class="meterBar"><div id="enemyMeterFill" class="meterFill"></div></div>
-  </div>
-
   <div class="panel" id="bottomleft">
     <span id="matchupLabel"></span><br>
     <span id="controlsHint"></span>
@@ -380,6 +479,8 @@
     <div id="chatLog"></div>
     <input type="text" id="chatInput" maxlength="200" placeholder="Enterで送信 (Tでチャット欄へ)">
   </div>
+
+  <div id="spectateNotice">撃墜されました<small>味方機を観戦中（決着まで見守ってください）</small></div>
 
   <div id="gunsFlash">GUNS!</div>
   <div id="stallWarn">STALL</div>
@@ -427,7 +528,8 @@
       <p>3rd/4th世代 戦闘機による近接格闘戦シミュレーター<br>相手の射線（ガンコーン）に入り続けると撃墜されます。</p>
       <div class="menuButtons">
         <button class="menuBtn" id="btnVsAI">AIと対戦（1人プレイ）</button>
-        <button class="menuBtn" id="btnRandomMatch">オンライン: ランダムマッチ</button>
+        <button class="menuBtn" id="btnRandomMatch">オンライン: ランダムマッチ（1対1）</button>
+        <button class="menuBtn" id="btnRandomTeamMatch">オンライン: ランダムマッチ（4対4）</button>
         <button class="menuBtn" id="btnCreateRoom">オンライン: ルームを作成（フレンド戦）</button>
         <button class="menuBtn secondary" id="btnJoinRoomShow">オンライン: ルームに参加</button>
       </div>
@@ -440,6 +542,17 @@
         <a href="index2_6dof.html" download>このゲームをダウンロード</a><br>
         サーバーが落ちていても、保存したファイルを開けばAI対戦だけは遊べます。
       </p>
+      <!-- グローバルチャットはメニュー画面の一番下に置く。縦に短い画面では
+           ここから下がスクロール領域になるが、対戦ボタン・ダウンロードリンクは
+           常に画面内に収まる。 -->
+      <div id="lobbyChat">
+        <div class="lobbyChatHeader">
+          <span>グローバルチャット</span>
+          <span id="lobbyChatStatus">接続中…</span>
+        </div>
+        <div id="lobbyChatLog"></div>
+        <input type="text" id="lobbyChatInput" maxlength="200" placeholder="Enterで送信（メニューを開いている全員に届きます）">
+      </div>
     </div>
 
     <div class="screen" id="screenCategorySelect">
@@ -461,6 +574,21 @@
         <button class="menuBtn secondary" id="btnJoinRoomBack">戻る</button>
       </div>
       <p class="menuNote" id="joinRoomNote"></p>
+    </div>
+
+    <div class="screen" id="screenRoom">
+      <h1>ルーム: <span id="roomCodeDisplay"></span></h1>
+      <p id="roomNote">このコードを相手に伝えて「ルームに参加」してもらってください。</p>
+      <div id="roomTeams">
+        <div class="roomTeam teamA"><h2>TEAM A（北から出撃）</h2><ul id="roomListA"></ul></div>
+        <div class="roomTeam teamB"><h2>TEAM B（南から出撃）</h2><ul id="roomListB"></ul></div>
+      </div>
+      <div class="menuButtons">
+        <button class="menuBtn secondary" id="btnRoomSwitchTeam">チームを移る</button>
+        <button class="menuBtn" id="btnRoomStart">対戦開始</button>
+        <button class="menuBtn secondary" id="btnRoomLeave">ルームを出る</button>
+      </div>
+      <p class="menuNote" id="roomStatusNote"></p>
     </div>
 
     <div class="screen" id="screenWaiting">
@@ -916,7 +1044,6 @@ function orderForCategory(category) {
 }
 
 // --- 1-3. 兵装（ガン）定数 ---
-const GUN_CONE = 3 * DEG;    // 射線と判定する半角
 const GUN_RANGE = 800;       // m
 const GUN_MIN_RANGE = 0;
 
@@ -996,8 +1123,6 @@ const eturnRateEl = document.getElementById("eturnrate");
 
 const stallWarnEl = document.getElementById("stallWarn");
 const flapsWarnEl = document.getElementById("flapsWarn");
-const playerMeterFill = document.getElementById("playerMeterFill");
-const enemyMeterFill = document.getElementById("enemyMeterFill");
 const gunsFlashEl = document.getElementById("gunsFlash");
 const centerMsg = document.getElementById("center-message");
 const msgTitle = document.getElementById("msgTitle");
@@ -1246,7 +1371,10 @@ function buildAircraftMesh(params) {
 }
 
 // --- 5-2. 機体の状態を作る（物理シミュレーションの本体データ） ---
-function createState(typeKey, position, headingDeg, isPlayer) {
+// team    : "A" | "B"（違うチーム同士だけが撃ち合える）
+// control : "local"（自分が操縦）| "ai"（この端末が思考を回す）| "remote"（通信で受け取る）
+// netId   : オンライン対戦で機体を識別するID（AI機・オフライン時は null）
+function createState(typeKey, position, headingDeg, isPlayer, opts) {
   const params = AIRCRAFT_DB[typeKey];
   const mesh = buildAircraftMesh(params);
   scene.add(mesh);
@@ -1257,8 +1385,14 @@ function createState(typeKey, position, headingDeg, isPlayer) {
   // 初期速度：ジェット機は230 m/s（≈828km/h）、レシプロ機は最高速度域に近い500km/hでスポーンする
   const spawnSpeed = params.category === "prop" ? 500 / 3.6 : 230;
 
+  const o = opts || {};
   return {
     isPlayer,
+    team: o.team || (isPlayer ? "A" : "B"),
+    control: o.control || (isPlayer ? "local" : "ai"),
+    netId: o.netId || null,
+    name: o.name || null,
+    remote: null,            // control==="remote" のとき、通信で受け取った最新状態（補間の目標値）
     params,
     mesh,
     position: position.clone(),
@@ -1376,7 +1510,7 @@ function deriveMomentPoints(p) {
 //   横滑りβから生じる weathercock（機首を相対風へ）・dihedral（βと逆へロール）などの
 //   空力モーメントを加えることで、横滑り・ダッチロール・旋回協調が計算結果として創発する。
 function deriveFlightModel(p) {
-  const S = p.wingArea, b = p.wingSpan, L = p.fuselageLen;
+  const b = p.wingSpan, L = p.fuselageLen;
   const m = p.mass;
 
   // 慣性モーメント[kg·m^2]（概算）：ロールは翼幅、ピッチ/ヨーは胴体長が支配
@@ -1505,7 +1639,6 @@ function stepPhysics(state, controls, dt, opponent) {
   const maxAoA = effectiveMaxAoA(p, extendedActive);
 
   const AOA_LIMIT_MARGIN = 2.5 * DEG;
-  const aoaExceeded = alphaAbs > maxAoA;
   let elevatorCmd = controls.elevator;
   // AoAリミッター（フライ・バイ・ワイヤの保護）はジェット機のみが持つ。レシプロ機には
   // この保護が存在しないため、舵入力がそのまま素通しになり、本当に失速角を超え得る
@@ -1526,10 +1659,6 @@ function stepPhysics(state, controls, dt, opponent) {
   const stallCtrlFactor = alphaAbs > p.stallAoA
     ? THREE.MathUtils.clamp(1 - (alphaAbs - p.stallAoA) / p.extendedRange, 0.15, 1)
     : 1;
-  // 横滑りが大きくなるほどラダーの追加の効きも落ちる（乱れた気流＋機体側の復元力とつり合い、
-  // 際限なく横滑りが増え続けるのを防ぐ）
-  const betaCtrlFactor = THREE.MathUtils.clamp(1 - Math.abs(beta) / (35 * DEG), 0.2, 1);
-
   // === 6DOF回転運動（移行版）：舵入力→目標レート収束（キネマティック）を廃し、
   //     実際のモーメントを慣性で割った角加速度を積分する。制御・減衰係数は既存の最大
   //     レートから校正済みなので操作感・機体バランスは保ちつつ、横滑り(weathercock/
@@ -1860,35 +1989,166 @@ function computeAIControls(ai, target, dt) {
 
 
 // ================================================================
-// 9. 機体インスタンス管理（プレイヤー機・敵機は選択式）
+// 9. 機体インスタンス管理（1対1〜4対4のチーム戦を同じ仕組みで扱う）
 // ================================================================
-let player, enemy;
+// combatants  : この対戦に出ている全機（自機・味方・敵をまとめて保持する）
+// player      : 自分が操縦している機体（combatants の中の1つ）
+// enemy       : 「今の主目標」＝生存中の敵機のうち最も近い1機。
+//               カメラ・敵ステータス欄・敵インジケーターなど、
+//               1機だけを見せるUIはすべてこの主目標を指す。
+// viewTarget  : カメラが追う機体。自分が生きている間は自機、撃墜後は観戦対象。
+let combatants = [];
+let player = null;
+let enemy = null;
+let viewTarget = null;
 
-// side="A": プレイヤーは北側(0,4000,0)出撃／side="B": プレイヤーは南側(0,4000,-1800)出撃。
-// オンライン対戦の両クライアントで座標系を共有するため、互いに向き合う位置に出撃させる。
-function resetGame(playerType, enemyType, side) {
+const TEAM_SPAWN = {
+  A: { z: 0, hdg: 0 },        // 北側。機首は -z（南）を向く
+  B: { z: -1800, hdg: 180 },  // 南側。機首は +z（北）を向く
+};
+const SPAWN_ALTITUDE = 4000;
+const SPAWN_LATERAL_GAP = 400; // 同じチーム内で機体を横に並べる間隔(m)
+
+// 主目標・AIの狙う相手・射撃判定の相手は「生きている敵のうち最も近い機体」で統一する
+function nearestHostile(c) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const o of combatants) {
+    if (o === c || o.team === c.team || !o.alive) continue;
+    const d = c.position.distanceTo(o.position);
+    if (d < bestDist) { bestDist = d; best = o; }
+  }
+  return best;
+}
+
+function teamAlive(team) {
+  return combatants.some((c) => c.team === team && c.alive);
+}
+
+function labelFor(c) {
+  return c.name ? `${c.name} / ${c.params.label}` : c.params.label;
+}
+
+// 主目標と観戦対象を選び直す（撃墜が起きたときと、毎フレームの距離変化に追従するため）
+function updateFocusTarget() {
+  if (!player) return;
+  enemy = nearestHostile(player) || combatants.find((c) => c.team !== player.team) || enemy;
+  if (player.alive) {
+    viewTarget = player;
+  } else if (!viewTarget || !viewTarget.alive) {
+    // 撃墜後は味方機を優先して観戦し、味方が全滅していれば残っている誰かを映す
+    viewTarget = combatants.find((c) => c.alive && c.team === player.team)
+      || combatants.find((c) => c.alive)
+      || player;
+  }
+  updateMatchLabels();
+}
+
+function updateMatchLabels() {
+  if (!player) return;
+  const foe = enemy;
+  enemyPanelLabelEl.textContent = foe ? `ENEMY (${labelFor(foe)})` : "ENEMY";
+  const allies = combatants.filter((c) => c.team === player.team);
+  const foes = combatants.filter((c) => c.team !== player.team);
+  if (allies.length === 1 && foes.length === 1) {
+    // 1対1のときは今まで通りの表記のまま（余計な情報を増やさない）
+    matchupLabelEl.textContent = `自機: ${player.params.label} ／ 敵機: ${foe ? labelFor(foe) : "-"}`;
+  } else {
+    const aliveAllies = allies.filter((c) => c.alive).length;
+    const aliveFoes = foes.filter((c) => c.alive).length;
+    const spectating = player.alive ? "" : `　観戦中: ${viewTarget && viewTarget !== player ? labelFor(viewTarget) : "-"}`;
+    matchupLabelEl.textContent =
+      `自機: ${player.params.label}　味方 ${aliveAllies}/${allies.length}　敵 ${aliveFoes}/${foes.length}${spectating}`;
+  }
+}
+
+// roster: [{ type, team, control, netId, name }] の配列。
+// 出撃位置はチーム（南北）と、そのチーム内での並び順だけで決まるので、
+// 全クライアントが同じ roster を受け取れば同じ初期配置になる。
+function resetMatch(roster) {
   scene.children = scene.children.filter((c) => !c.userData.isAircraft);
+  combatants = [];
+  player = null;
 
-  const spawnNorth = { pos: new THREE.Vector3(0, 4000, 0), hdg: 0 };
-  const spawnSouth = { pos: new THREE.Vector3(0, 4000, -1800), hdg: 180 };
-  const mySpawn = side === "B" ? spawnSouth : spawnNorth;
-  const oppSpawn = side === "B" ? spawnNorth : spawnSouth;
+  const indexInTeam = { A: 0, B: 0 };
+  const teamSize = { A: 0, B: 0 };
+  roster.forEach((r) => { teamSize[r.team === "B" ? "B" : "A"] += 1; });
 
-  player = createState(playerType || "F16", mySpawn.pos, mySpawn.hdg, true);
-  enemy = createState(enemyType || "SU27", oppSpawn.pos, oppSpawn.hdg, false);
-  player.mesh.userData.isAircraft = true;
-  enemy.mesh.userData.isAircraft = true;
-  player.underFireMeter = 0;
-  enemy.underFireMeter = 0;
+  roster.forEach((r) => {
+    const team = r.team === "B" ? "B" : "A";
+    const i = indexInTeam[team]++;
+    const spawn = TEAM_SPAWN[team];
+    // チームの中心を基準に左右へ均等に広げる（1機だけなら従来と同じ真ん中）
+    const x = (i - (teamSize[team] - 1) / 2) * SPAWN_LATERAL_GAP;
+    const isLocal = r.control === "local";
+    const c = createState(r.type, new THREE.Vector3(x, SPAWN_ALTITUDE, spawn.z), spawn.hdg, isLocal, {
+      team, control: r.control, netId: r.netId, name: r.name,
+    });
+    c.mesh.userData.isAircraft = true;
+    c.underFireMeter = 0;
+    c.deathHandled = false;
+    combatants.push(c);
+    if (isLocal) player = c;
+  });
+
+  if (!player) player = combatants[0]; // 保険（ローカル機のない roster は本来渡さない）
+  viewTarget = player;
+  enemy = nearestHostile(player) || combatants.find((c) => c.team !== player.team) || null;
+
   gameOver = false;
   camInit = false;
   clearTracers(); // 前の対戦で飛んでいた弾を持ち込まない
-  tracerAccumPlayer = 0;
-  tracerAccumEnemy = 0;
+  tracerAccum = new WeakMap();
+  showSpectateNotice(false);
+  updateMatchLabels();
+}
 
-  const enemyNamePrefix = mode === "online" && opponentName ? `${opponentName} / ` : "";
-  enemyPanelLabelEl.textContent = `ENEMY (${enemyNamePrefix}${enemy.params.label})`;
-  matchupLabelEl.textContent = `自機: ${player.params.label} ／ 敵機: ${enemyNamePrefix}${enemy.params.label}`;
+// 操作入力なし（狙う敵が居ないAI機用）
+const NEUTRAL_CONTROLS = {
+  elevator: 0, aileron: 0, rudder: 0, throttleUp: false, throttleDown: false, airbrake: false,
+};
+
+// 機体を撃墜済みにする。deathHandled を見ているので、何度呼ばれても1回しか効かない。
+function killCombatant(c) {
+  if (c.deathHandled) return;
+  c.deathHandled = true;
+  c.alive = false;
+  c.underFireMeter = 0;
+  c.mesh.visible = false;
+  updateFocusTarget();
+}
+
+// 自分が撃墜されたとき：味方がまだ戦っていれば観戦へ移り、味方全滅なら自分の負けが確定する。
+// （1対1では味方＝自分だけなので、従来どおり即座に敗北画面になる）
+function onLocalPlayerDied() {
+  if (!teamAlive(player.team)) {
+    endGame(false);
+  } else {
+    showSpectateNotice(true);
+  }
+}
+
+const spectateNoticeEl = document.getElementById("spectateNotice");
+function showSpectateNotice(visible) {
+  spectateNoticeEl.style.display = visible ? "block" : "none";
+}
+
+// 1対1用の従来インターフェース（AI対戦・メニュー背景・1対1のオンライン対戦から呼ばれる）。
+// side="A": 自機は北側／side="B": 自機は南側。オンライン対戦の両クライアントで
+// 座標系を共有するため、互いに向き合う位置に出撃させる。
+function resetGame(playerType, enemyType, side) {
+  const myTeam = side === "B" ? "B" : "A";
+  const foeTeam = myTeam === "B" ? "A" : "B";
+  resetMatch([
+    { type: playerType || "F16", team: myTeam, control: "local", netId: null, name: null },
+    {
+      type: enemyType || "SU27",
+      team: foeTeam,
+      control: mode === "online" ? "remote" : "ai",
+      netId: mode === "online" ? "opponent" : null,
+      name: mode === "online" ? opponentName : null,
+    },
+  ]);
 }
 
 
@@ -1907,7 +2167,12 @@ let prevShiftHeld = false;
 let camTransitionTimer = 0; // Shiftの押下/解放の直後だけ、切り替えを速くするためのタイマー
 
 function updateCamera(dt) {
-  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quat);
+  // 追うのは viewTarget（自分が生きている間は自機、撃墜後は観戦している機体）。
+  // 「見る敵」も観戦対象から見た敵にするため、focus はその機体の主目標を使う。
+  const view = viewTarget || player;
+  if (!view) return;
+  const focus = focusTargetForView();
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(view.quat);
 
   // ロール成分だけを除いた「機首の向き（ヨー・ピッチ）」を基準姿勢にする。
   // ほぼ真上/真下を向いたときのジンバルロックによる視点破綻を避けるため、
@@ -1919,7 +2184,7 @@ function updateCamera(dt) {
 
   // 針路方向の速度が基準より遅いほどカメラを自機に寄せ、速いほど離す
   // （失速や急減速を、視覚的な「寄り」で体感できるようにする）
-  const speedRatio = THREE.MathUtils.clamp((player.hud.forwardSpeed || player.hud.speed) / REF_SPEED, 0.3, 1.5);
+  const speedRatio = THREE.MathUtils.clamp((view.hud.forwardSpeed || view.hud.speed) / REF_SPEED, 0.3, 1.5);
   const targetDistFactor = THREE.MathUtils.clamp(0.6 + 0.4 * speedRatio, 0.6, 1.2);
   camDistFactor += (targetDistFactor - camDistFactor) * (1 - Math.exp(-dt * 2.5));
 
@@ -1935,15 +2200,15 @@ function updateCamera(dt) {
   if (shiftHeld) {
     // 敵機と反対側（自機を挟んで敵機の真逆）へ回り込む＝カメラ－自機－敵機が一直線になる。
     // 敵機が真後ろなら自機の正面が、真上なら自機の腹が見える、という具合に自然と決まる。
-    const sep = player.position.clone().sub(enemy.position);
+    const sep = focus ? view.position.clone().sub(focus.position) : forward.clone().negate();
     const awayDir = sep.lengthSq() > 1 ? sep.normalize() : forward.clone().negate();
-    desiredCamPos = player.position.clone().addScaledVector(awayDir, SHIFT_CAM_DIST);
-    desiredLookAt = enemy.position.clone();
+    desiredCamPos = view.position.clone().addScaledVector(awayDir, SHIFT_CAM_DIST);
+    desiredLookAt = focus ? focus.position.clone() : view.position.clone().addScaledVector(forward, 6);
   } else {
     // 通常時：自機の姿勢を安定して映す追従カメラ。視線は常に自機（少し先）を固定して見る。
     const offset = new THREE.Vector3(0, 4.5, 13).multiplyScalar(camDistFactor).applyQuaternion(camRefQuat);
-    desiredCamPos = player.position.clone().add(offset);
-    desiredLookAt = player.position.clone().addScaledVector(forward, 6);
+    desiredCamPos = view.position.clone().add(offset);
+    desiredLookAt = view.position.clone().addScaledVector(forward, 6);
   }
 
   if (!camInit) {
@@ -1961,7 +2226,7 @@ function updateCamera(dt) {
   camera.lookAt(camLookSmoothed);
 
   // 敵機との距離に応じてズーム（FOVを狭める）し、遠距離でも姿勢を判別しやすくする
-  const distToEnemy = player.position.distanceTo(enemy.position);
+  const distToEnemy = focus ? view.position.distanceTo(focus.position) : 1e4;
   const targetFOV = THREE.MathUtils.clamp(BASE_FOV - distToEnemy * 0.018, 20, BASE_FOV);
   camFOV += (targetFOV - camFOV) * (1 - Math.exp(-dt * 3));
   if (Math.abs(camera.fov - camFOV) > 0.01) {
@@ -1976,10 +2241,26 @@ function updateCamera(dt) {
 // ================================================================
 
 // --- 11-1. 敵機ハイライト：3D空間の発光マーカー＋画面外インジケーター ---
+// カメラが今映している機体から見た主目標（＝マーカーを付ける相手）
+function focusTargetForView() {
+  const view = viewTarget || player;
+  if (!view) return null;
+  return view === player ? enemy : (nearestHostile(view) || enemy);
+}
+
 function updateEnemyIndicator() {
+  // 全機撃墜などで主目標が居ないときは、マーカーごと隠す
+  const foe = focusTargetForView();
+  if (!foe) {
+    enemyMarkerSprite.visible = false;
+    enemyIndicatorEl.style.display = "none";
+    return;
+  }
+  enemyMarkerSprite.visible = true;
+  enemyIndicatorEl.style.display = "";
   // 距離に応じてサイズを調整し、常に画面上で見失わないサイズを保つビーコン
-  const dist = camera.position.distanceTo(enemy.position);
-  const markerPos = enemy.position.clone().addScaledVector(new THREE.Vector3(0, 1, 0).applyQuaternion(enemy.quat), 5.5);
+  const dist = camera.position.distanceTo(foe.position);
+  const markerPos = foe.position.clone().addScaledVector(new THREE.Vector3(0, 1, 0).applyQuaternion(foe.quat), 5.5);
   enemyMarkerSprite.position.copy(markerPos);
   const scale = THREE.MathUtils.clamp(dist * 0.022, 3, 70);
   enemyMarkerSprite.scale.set(scale, scale, scale);
@@ -1992,17 +2273,17 @@ function updateEnemyIndicator() {
 
   // 敵機の姿勢（バンク角）をカメラの画面平面に投影し、マーカーの向きに反映する
   // ＝マーカーの傾きを見れば敵機がどれだけ傾いているか分かる
-  const enemyUp = new THREE.Vector3(0, 1, 0).applyQuaternion(enemy.quat);
-  const upScreenX = enemyUp.dot(camRight);
-  const upScreenY = enemyUp.dot(camUp);
+  const foeUp = new THREE.Vector3(0, 1, 0).applyQuaternion(foe.quat);
+  const upScreenX = foeUp.dot(camRight);
+  const upScreenY = foeUp.dot(camUp);
   const bankAngle = Math.atan2(upScreenX, upScreenY);
   enemyMarkerSprite.material.rotation = -bankAngle;
 
-  const toEnemy = enemy.position.clone().sub(camera.position).normalize();
+  const toFoe = foe.position.clone().sub(camera.position).normalize();
 
-  const x = toEnemy.dot(camRight);
-  const y = toEnemy.dot(camUp);
-  const z = toEnemy.dot(camFwd);
+  const x = toFoe.dot(camRight);
+  const y = toFoe.dot(camUp);
+  const z = toFoe.dot(camFwd);
 
   const vFov = (camera.fov * Math.PI) / 180;
   const tanV = Math.tan(vFov / 2);
@@ -2039,9 +2320,11 @@ function updateEnemyIndicator() {
 
 // --- 11-2. 水平姿勢指示計（ADI）：自機のピッチ・バンク角を常時表示する ---
 function updateADI() {
-  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quat);
-  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(player.quat);
-  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(player.quat);
+  const view = viewTarget || player;
+  if (!view) return;
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(view.quat);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(view.quat);
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(view.quat);
 
   const pitchDeg = (Math.asin(THREE.MathUtils.clamp(forward.y, -1, 1)) * 180) / Math.PI;
   const bankRad = Math.atan2(right.y, up.y);
@@ -2112,9 +2395,8 @@ let mode = null;        // "ai" | "online"（メニューにいる間は null）
 let running = false;
 let gameOver = false;
 let lastTime = performance.now();
-// 曳光弾を撒く間隔を計るタイマー（自機・敵機それぞれ独立）
-let tracerAccumPlayer = 0;
-let tracerAccumEnemy = 0;
+// 曳光弾を撒く間隔を計るタイマー（機体ごとに独立。対戦のたびに作り直す）
+let tracerAccum = new WeakMap();
 
 function animate() {
   const now = performance.now();
@@ -2123,14 +2405,22 @@ function animate() {
   dt = Math.min(dt, 0.05);
 
   if (running && !gameOver) {
-    const pControls = readPlayerControls();
-    stepPhysics(player, pControls, dt, enemy);
+    // --- 1. 全機を1ステップ進める（操縦の出どころだけが機体ごとに違う） ---
+    for (const c of combatants) {
+      if (!c.alive) continue;
+      const foe = nearestHostile(c);
+      if (c.control === "local") {
+        stepPhysics(c, readPlayerControls(), dt, foe);
+      } else if (c.control === "ai") {
+        // 狙う敵が居なくなったAI機は、操作入力なしでそのまま直進させる
+        const ctrl = foe ? computeAIControls(c, foe, dt) : NEUTRAL_CONTROLS;
+        stepPhysics(c, ctrl, dt, foe);
+      } else {
+        applyRemoteState(c, dt); // 通信で受け取った相手機は、物理を回さず補間するだけ
+      }
+    }
 
-    if (mode === "ai") {
-      const aControls = computeAIControls(enemy, player, dt);
-      stepPhysics(enemy, aControls, dt, player);
-    } else if (mode === "online") {
-      applyRemoteState(enemy, dt);
+    if (mode === "online") {
       stateSendAccum += dt;
       if (stateSendAccum >= STATE_SEND_INTERVAL) {
         stateSendAccum = 0;
@@ -2138,63 +2428,86 @@ function animate() {
       }
     }
 
-    const playerInGunsResult = updateGunSolution(enemy, player, dt);
-    const enemyInGunsResult = updateGunSolution(player, enemy, dt);
+    updateFocusTarget();
 
-    gunsFlashEl.style.opacity = enemyInGunsResult.inCone ? 1 : 0;
-
-    // 曳光弾を撒く：どちらの機体も相手が射程圏内にいる間は撃ち続ける
-    // （ガンの命中判定自体も「射線に入り続けたら当たる」常時発射モデルなので、それを可視化している）。
-    // 遠すぎる時に撃たないのは、当たる見込みのない曳光弾で画面が埋まるのを避けるため。
-    const gunDist = player.position.distanceTo(enemy.position);
-    if (gunDist < TRACER_FIRE_RANGE) {
-      tracerAccumPlayer += dt;
-      if (tracerAccumPlayer >= TRACER_INTERVAL) {
-        tracerAccumPlayer = 0;
-        if (player.alive) spawnTracer(player, true);
-      }
-      tracerAccumEnemy += dt;
-      if (tracerAccumEnemy >= TRACER_INTERVAL) {
-        tracerAccumEnemy = 0;
-        if (enemy.alive) spawnTracer(enemy, false);
+    // --- 2. 射撃判定：敵対する生存機のすべての組み合わせを見る ---
+    // 1対1のときは今まで通り2通りしか無い。4対4でも射程内の組だけに絞るので、
+    // 弾道シミュレーションを回す回数は実際にはごく少ない。
+    for (const c of combatants) c.underFireMeter = 0;
+    let playerHasGunSolution = false;
+    for (const attacker of combatants) {
+      if (!attacker.alive) continue;
+      for (const target of combatants) {
+        if (!target.alive || target.team === attacker.team) continue;
+        if (attacker.position.distanceTo(target.position) > GUN_RANGE) continue;
+        const { inCone } = updateGunSolution(attacker, target, dt);
+        if (inCone) {
+          target.underFireMeter = 1; // 誰か1機でも射線に捉えていれば被弾扱い（即時撃墜）
+          if (attacker === player) playerHasGunSolution = true;
+        }
       }
     }
 
-    playerMeterFill.style.width = (player.underFireMeter * 100) + "%";
-    enemyMeterFill.style.width = (enemy.underFireMeter * 100) + "%";
+    gunsFlashEl.style.opacity = playerHasGunSolution ? 1 : 0;
 
-    spdEl.textContent = Math.round(player.hud.speed * 3.6);
-    altEl.textContent = Math.round(player.position.y);
-    thrEl.textContent = Math.round(player.throttle * 100);
-    gEl.textContent = player.hud.gforce.toFixed(1);
-    aoaEl.textContent = Math.round(player.hud.alpha);
-    turnRateEl.textContent = Math.round(player.hud.turnRate);
-    stallWarnEl.style.display = player.hud.stall ? "block" : "none";
-    flapsWarnEl.style.display = player.hud.flapsActive ? "block" : "none";
+    // --- 3. 曳光弾：敵が射程内にいる機体は撃ち続ける ---
+    // （ガンの命中判定自体も「射線に入り続けたら当たる」常時発射モデルなので、それを可視化している）。
+    // 遠すぎる時に撃たないのは、当たる見込みのない曳光弾で画面が埋まるのを避けるため。
+    for (const c of combatants) {
+      if (!c.alive) continue;
+      const foe = nearestHostile(c);
+      if (!foe || c.position.distanceTo(foe.position) > TRACER_FIRE_RANGE) continue;
+      const accum = (tracerAccum.get(c) || 0) + dt;
+      if (accum >= TRACER_INTERVAL) {
+        tracerAccum.set(c, 0);
+        spawnTracer(c, c === player);
+      } else {
+        tracerAccum.set(c, accum);
+      }
+    }
+
+    // --- 4. HUD（左上は自機／観戦中は観戦対象、右上は主目標） ---
+    const view = viewTarget || player;
+    spdEl.textContent = Math.round(view.hud.speed * 3.6);
+    altEl.textContent = Math.round(view.position.y);
+    thrEl.textContent = Math.round(view.throttle * 100);
+    gEl.textContent = view.hud.gforce.toFixed(1);
+    aoaEl.textContent = Math.round(view.hud.alpha);
+    turnRateEl.textContent = Math.round(view.hud.turnRate);
+    stallWarnEl.style.display = view.hud.stall ? "block" : "none";
+    flapsWarnEl.style.display = view.hud.flapsActive ? "block" : "none";
 
     // 敵機のステータス表示（フィードバック確認用。右上の×またはIキーで消せる）
-    espdEl.textContent = Math.round(enemy.hud.speed * 3.6);
-    ealtEl.textContent = Math.round(enemy.position.y);
-    ethrEl.textContent = Math.round(enemy.throttle * 100);
-    egEl.textContent = enemy.hud.gforce.toFixed(1);
-    eaoaEl.textContent = Math.round(enemy.hud.alpha);
-    eturnRateEl.textContent = Math.round(enemy.hud.turnRate);
+    if (enemy) {
+      espdEl.textContent = Math.round(enemy.hud.speed * 3.6);
+      ealtEl.textContent = Math.round(enemy.position.y);
+      ethrEl.textContent = Math.round(enemy.throttle * 100);
+      egEl.textContent = enemy.hud.gforce.toFixed(1);
+      eaoaEl.textContent = Math.round(enemy.hud.alpha);
+      eturnRateEl.textContent = Math.round(enemy.hud.turnRate);
+    }
 
+    // --- 5. 撃墜の確定 ---
     if (mode === "ai") {
-      // シングルプレイは両者ともローカルで完全に物理シミュレーションしているため、
-      // 自分・相手どちらの撃墜も自分の端末だけで確定させてよい。
-      if (!player.alive || player.underFireMeter >= 1) {
+      // シングルプレイは全機ともローカルで完全に物理シミュレーションしているため、
+      // 誰の撃墜も自分の端末だけで確定させてよい。
+      // 地面衝突（stepPhysics が alive=false にする）と被弾の両方をここで拾う
+      for (const c of combatants) {
+        if (!c.deathHandled && (!c.alive || c.underFireMeter >= 1)) killCombatant(c);
+      }
+      if (!teamAlive(player.team)) {
         endGame(false);
-      } else if (!enemy.alive || enemy.underFireMeter >= 1) {
+      } else if (!teamAlive(player.team === "A" ? "B" : "A")) {
         endGame(true);
       }
     } else if (mode === "online") {
       // オンライン対戦では「自分が撃墜されたかどうか」は自分の端末だけが正確に判定できる
       // （相手の位置はネットワーク遅延を含む補間値のため）。撃墜された側が i_died を送り、
-      // 受け取った相手側が勝利を確定させる（自己申告方式）。
-      if (!player.alive || player.underFireMeter >= 1) {
-        endGame(false);
+      // サーバーが全員へ撃墜と決着を配信する（自己申告方式）。
+      if (!player.deathHandled && (!player.alive || player.underFireMeter >= 1)) {
+        killCombatant(player);
         sendNet({ type: "i_died" });
+        onLocalPlayerDied();
       }
     }
   }
@@ -2225,6 +2538,7 @@ const screens = {
   menu: document.getElementById("screenMenu"),
   category: document.getElementById("screenCategorySelect"),
   joinRoom: document.getElementById("screenJoinRoom"),
+  room: document.getElementById("screenRoom"),
   waiting: document.getElementById("screenWaiting"),
   select: document.getElementById("screenAircraftSelect"),
   gameOver: document.getElementById("screenGameOver"),
@@ -2324,21 +2638,25 @@ function onCategoryChosen(category) {
   if (mode === "ai") {
     startAircraftSelectForPlayer();
   } else if (mode === "online") {
-    if (pendingOnlineAction === "random") {
+    if (pendingOnlineAction === "random" || pendingOnlineAction === "randomTeam") {
       // 見つかるまでの間もAIと練習できるように、先にキュー接続だけ済ませておき、
       // 画面自体はAIモードと同じ「自機を選ぶ」フローに乗せる（敵機はランダムで即開戦）。
+      // これはチーム戦のキュー（8人揃うまで待つ）でも同じ。
+      const teamSize = pendingOnlineAction === "randomTeam" ? 4 : 1;
       queuedForRandomMatch = true;
-      connectWS({ type: "queue_random", category }).catch((e) => {
+      connectWS({ type: "queue_random", category, size: teamSize, name: loadPlayerName() || "名無しさん" }).catch((e) => {
         queuedForRandomMatch = false;
         returnToMenu("接続に失敗しました: " + e.message);
       });
       mode = "ai";
       aiStage = "player";
-      showAircraftSelect("対戦相手を探しています…自分の機体を選ぶと、見つかるまでAIと練習できます。");
+      showAircraftSelect(teamSize > 1
+        ? "4対4の参加者を探しています…自分の機体を選ぶと、揃うまでAIと練習できます。"
+        : "対戦相手を探しています…自分の機体を選ぶと、見つかるまでAIと練習できます。");
     } else if (pendingOnlineAction === "create") {
       waitingTextEl.textContent = "接続しています…";
       showScreen("waiting");
-      connectWS({ type: "create_room", category }).catch((e) => {
+      connectWS({ type: "create_room", category, name: loadPlayerName() || "名無しさん" }).catch((e) => {
         returnToMenu("接続に失敗しました: " + e.message);
       });
     }
@@ -2399,16 +2717,22 @@ function onAircraftCardClick(key) {
   } else if (mode === "online") {
     myAircraftChoice = key;
     sendNet({ type: "select_aircraft", aircraft: key, name: loadPlayerName() || "名無しさん" });
-    selectStatusEl.textContent = opponentAircraftChoice
-      ? "対戦相手の準備を待っています…"
-      : "対戦相手の機体選択を待っています…";
+    selectStatusEl.textContent = "ほかの参加者を待っています…";
+    renderRosterProgress();
   }
 }
 
 // --- 14-3. ゲーム開始・終了画面 ---
 function startOnlineMatch() {
-  resetGame(myAircraftChoice, opponentAircraftChoice, onlineSide);
-  remoteState = null;
+  // サーバーから配られた roster をそのまま出撃順にする（全員が同じ配列を受け取るので、
+  // どの端末でも同じ初期配置になる）。自分の機体だけ control="local" にする。
+  resetMatch(matchRoster.map((p) => ({
+    type: p.aircraft || "F16",
+    team: p.team === "B" ? "B" : "A",
+    control: p.id === myNetId ? "local" : "remote",
+    netId: p.id,
+    name: p.id === myNetId ? null : (p.name || null),
+  })));
   stateSendAccum = 0;
   running = true;
   lastTime = performance.now();
@@ -2424,6 +2748,7 @@ function endGame(playerWon, customMessage) {
   running = false;
   showScreen("gameOver");
 
+  showSpectateNotice(false);
   if (playerWon === null) {
     // 相手の切断などで勝敗がつかずに終了した場合
     msgTitle.textContent = "対戦終了";
@@ -2434,11 +2759,21 @@ function endGame(playerWon, customMessage) {
 
   if (mode === "online") reportMatchResult(playerWon); // 緩いランクはオンライン対戦のみ集計
 
-  msgTitle.textContent = playerWon ? "撃墜成功！" : "撃墜された…";
-  msgBody.textContent = customMessage || (playerWon ? "敵機を撃墜しました。" : "敵の射線に入ってしまいました。");
+  const isTeamMatch = combatants.length > 2;
+  if (isTeamMatch) {
+    msgTitle.textContent = playerWon ? "チームの勝利！" : "チームの敗北…";
+    msgBody.textContent = customMessage
+      || (playerWon ? "敵チームを全機撃墜しました。" : "味方が全機撃墜されました。");
+  } else {
+    msgTitle.textContent = playerWon ? "撃墜成功！" : "撃墜された…";
+    msgBody.textContent = customMessage || (playerWon ? "敵機を撃墜しました。" : "敵の射線に入ってしまいました。");
+  }
+  showSpectateNotice(false);
   btnPrimaryEl.style.display = "";
   btnPrimaryEl.disabled = false;
-  btnPrimaryEl.textContent = mode === "online" ? "もう一度（同じ相手と）" : "もう一度";
+  btnPrimaryEl.textContent = mode === "online"
+    ? (isTeamMatch ? "もう一度（同じメンバーで）" : "もう一度（同じ相手と）")
+    : "もう一度";
   btnPrimaryEl.onclick = () => {
     if (mode === "online") {
       btnPrimaryEl.disabled = true;
@@ -2466,12 +2801,13 @@ document.getElementById("btnToMenu").addEventListener("click", () => {
 });
 
 // --- 14-4. WebSocket通信 ---
+// サーバーは「部屋」単位で人を束ねるだけで、飛行物理も命中判定も知らない。
+// 1対1も4対4も同じ「部屋」で表現し、人数とチーム分けだけが違う。
 let ws = null;
-let onlineSide = null;               // "A" | "B"
+let myNetId = null;                  // この端末の機体を指すID（サーバーが発行）
+let matchRoster = [];                // 対戦に出る全員 [{id,name,team,aircraft}]
 let myAircraftChoice = null;
-let opponentAircraftChoice = null;
-let opponentName = null;
-let remoteState = null;              // 相手機の最新ネットワーク状態（補間の目標値）
+let opponentName = null;             // 1対1のときの相手名（既存の表示に使う）
 let stateSendAccum = 0;
 const STATE_SEND_INTERVAL = 1 / 20;  // 状態送信は20Hzで十分（毎フレーム送ると帯域を無駄にする）
 
@@ -2572,6 +2908,275 @@ chatInputEl.addEventListener("keydown", (e) => {
   }
 });
 
+// --- 14-4b. グローバルチャット（トップメニュー画面） ---
+// 対戦用の ws とは別に、常時つなぎっぱなしのソケットを1本持つ。対戦の中継処理と
+// 完全に分けておくことで、チャットが落ちても対戦は動き、対戦を抜けてもチャットは
+// 途切れない（メニューに戻るたびに繋ぎ直す必要がない）。
+const lobbyChatLogEl = document.getElementById("lobbyChatLog");
+const lobbyChatInputEl = document.getElementById("lobbyChatInput");
+const lobbyChatStatusEl = document.getElementById("lobbyChatStatus");
+
+const LOBBY_RECONNECT_MIN_MS = 3000;
+const LOBBY_RECONNECT_MAX_MS = 30000;
+const LOBBY_LOG_MAX_LINES = 200; // 開きっぱなしでもログが際限なく伸びないようにする
+const LOBBY_CHAT_INTERVAL_MS = 1500; // サーバー側の連投制限と同じ間隔。
+                                     // ここでも止めないと、サーバーに弾かれた発言が
+                                     // 自分の画面にだけ残って「送れたつもり」になってしまう。
+
+let lastLobbyChatAt = 0;
+let lobbyWs = null;
+let lobbyReconnectDelay = LOBBY_RECONNECT_MIN_MS;
+let lobbyReconnectTimer = null;
+
+function appendLobbyLine(kind, name, text) {
+  const line = document.createElement("div");
+  line.className = kind;
+  line.textContent = kind === "lobbySystem" ? text : `${name}: ${text}`;
+  lobbyChatLogEl.appendChild(line);
+  while (lobbyChatLogEl.childElementCount > LOBBY_LOG_MAX_LINES) {
+    lobbyChatLogEl.removeChild(lobbyChatLogEl.firstChild);
+  }
+  lobbyChatLogEl.scrollTop = lobbyChatLogEl.scrollHeight;
+}
+
+function setLobbyConnected(connected, statusText) {
+  lobbyChatStatusEl.textContent = statusText;
+  lobbyChatInputEl.disabled = !connected;
+}
+
+function scheduleLobbyReconnect() {
+  if (lobbyReconnectTimer) return;
+  lobbyReconnectTimer = setTimeout(() => {
+    lobbyReconnectTimer = null;
+    connectLobby();
+  }, lobbyReconnectDelay);
+  lobbyReconnectDelay = Math.min(lobbyReconnectDelay * 2, LOBBY_RECONNECT_MAX_MS);
+}
+
+function connectLobby() {
+  if (lobbyReconnectTimer) { clearTimeout(lobbyReconnectTimer); lobbyReconnectTimer = null; }
+  if (lobbyWs) {
+    const old = lobbyWs;
+    lobbyWs = null;
+    old.onclose = null; // 自分で張り直す時は再接続タイマーを起こさない
+    old.close();
+  }
+  let sock;
+  try {
+    sock = new WebSocket(getServerUrl());
+  } catch (e) {
+    setLobbyConnected(false, "接続できません");
+    scheduleLobbyReconnect();
+    return;
+  }
+  lobbyWs = sock;
+  setLobbyConnected(false, "接続中…");
+
+  sock.onopen = () => {
+    lobbyReconnectDelay = LOBBY_RECONNECT_MIN_MS;
+    sock.send(JSON.stringify({ type: "lobby_join", name: loadPlayerName() || "名無しさん" }));
+  };
+  sock.onerror = () => {}; // 失敗の後始末は onclose 側にまとめる
+  sock.onclose = () => {
+    if (lobbyWs !== sock) return; // 既に別の接続へ張り替え済み
+    lobbyWs = null;
+    setLobbyConnected(false, "接続できません（再接続します）");
+    scheduleLobbyReconnect();
+  };
+  sock.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+    switch (msg.type) {
+      case "lobby_history":
+        lobbyChatLogEl.innerHTML = "";
+        (msg.messages || []).forEach((m) => appendLobbyLine("lobbyOther", m.name, m.text));
+        setLobbyConnected(true, `接続中: ${msg.count}人`);
+        onlineNames = msg.names || [];
+        renderFriendList();
+        break;
+      case "lobby_names":
+        onlineNames = msg.names || [];
+        renderFriendList();
+        break;
+      case "friend_invited":
+        showInvite(msg.from || "名無しさん", msg.code);
+        break;
+      case "lobby_count":
+        setLobbyConnected(true, `接続中: ${msg.count}人`);
+        break;
+      case "lobby_chat":
+        appendLobbyLine("lobbyOther", msg.name || "名無しさん", msg.text);
+        break;
+    }
+  };
+}
+
+lobbyChatInputEl.addEventListener("keydown", (e) => {
+  e.stopPropagation();
+  if (e.key === "Escape") {
+    lobbyChatInputEl.value = "";
+    lobbyChatInputEl.blur();
+    return;
+  }
+  if (e.key !== "Enter") return;
+  const text = lobbyChatInputEl.value.trim();
+  if (!text) { lobbyChatInputEl.value = ""; return; }
+  if (!lobbyWs || lobbyWs.readyState !== WebSocket.OPEN) {
+    lobbyChatInputEl.value = "";
+    appendLobbyLine("lobbySystem", null, "（サーバーに繋がっていないため送信できませんでした）");
+    return;
+  }
+  const now = Date.now();
+  if (now - lastLobbyChatAt < LOBBY_CHAT_INTERVAL_MS) {
+    // 入力内容は消さずに残す（打ち直しの手間を省くため）
+    appendLobbyLine("lobbySystem", null, "（連続で送りすぎです。少し待ってから送信してください）");
+    return;
+  }
+  lastLobbyChatAt = now;
+  lobbyChatInputEl.value = "";
+  const myName = loadPlayerName() || "名無しさん";
+  lobbyWs.send(JSON.stringify({ type: "lobby_chat", name: myName, text }));
+  appendLobbyLine("lobbySelf", myName, text);
+});
+
+// --- 14-4c. フレンド（オンライン状況の表示とルーム招待） ---
+// アカウントの仕組みが無いゲームなので、フレンドは「相手のプレイヤー名を自分の端末に
+// 覚えておくだけ」の軽い仕組み。ロビー（グローバルチャット）に居る名前の一覧を
+// サーバーから受け取り、その中に居ればオンライン表示にする。
+// 同姓同名・なりすましは原理的に防げないので、そのことは画面にも明記している。
+const FRIENDS_KEY = "dogfightFriends";
+const friendListEl = document.getElementById("friendList");
+const friendNameInputEl = document.getElementById("friendNameInput");
+let onlineNames = [];
+let pendingInviteName = null; // 部屋が出来たら招待を送る相手（フレンド一覧の「招待」から設定）
+let inviteSentNotice = "";    // ルーム画面に出す「招待を送りました」の一文
+
+function loadFriends() {
+  try { return JSON.parse(localStorage.getItem(FRIENDS_KEY)) || []; } catch { return []; }
+}
+function saveFriends(list) {
+  try { localStorage.setItem(FRIENDS_KEY, JSON.stringify(list.slice(0, 50))); } catch {}
+}
+
+function renderFriendList() {
+  const friends = loadFriends();
+  friendListEl.innerHTML = "";
+  if (friends.length === 0) {
+    const p = document.createElement("p");
+    p.className = "friendNote";
+    p.textContent = "まだ誰も登録されていません。";
+    friendListEl.appendChild(p);
+    return;
+  }
+  friends.forEach((name) => {
+    const online = onlineNames.includes(name);
+    const row = document.createElement("div");
+    row.className = "friendRow " + (online ? "online" : "offline");
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "friendName";
+    nameEl.textContent = name;
+
+    const stateEl = document.createElement("span");
+    stateEl.className = "friendState";
+    stateEl.textContent = online ? "● メニューに居ます" : "○ オフライン";
+
+    const inviteBtn = document.createElement("button");
+    inviteBtn.className = "inviteBtn";
+    inviteBtn.textContent = "招待";
+    inviteBtn.disabled = !online;
+    inviteBtn.title = online ? "ルームを作ってこの人を招待します" : "相手がメニュー画面に居るときだけ招待できます";
+    inviteBtn.addEventListener("click", () => inviteFriend(name));
+
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "削除";
+    delBtn.addEventListener("click", () => {
+      saveFriends(loadFriends().filter((n) => n !== name));
+      renderFriendList();
+    });
+
+    row.append(nameEl, stateEl, inviteBtn, delBtn);
+    friendListEl.appendChild(row);
+  });
+}
+
+document.getElementById("friendAddBtn").addEventListener("click", () => {
+  const name = friendNameInputEl.value.trim().slice(0, 16);
+  if (!name) return;
+  const friends = loadFriends();
+  if (!friends.includes(name)) {
+    friends.push(name);
+    saveFriends(friends);
+  }
+  friendNameInputEl.value = "";
+  renderFriendList();
+});
+friendNameInputEl.addEventListener("keydown", (e) => {
+  e.stopPropagation();
+  if (e.key === "Enter") document.getElementById("friendAddBtn").click();
+});
+
+// 招待：自分がルームを作り、そのコードをロビー経由で相手に送る
+function inviteFriend(name) {
+  mode = "online";
+  matchCategory = matchCategory || "jet";
+  settingsPanelEl.classList.remove("active");
+  waitingTextEl.textContent = "ルームを作成しています…";
+  showScreen("waiting");
+  connectWS({ type: "create_room", category: matchCategory, name: loadPlayerName() || "名無しさん" })
+    .then(() => { pendingInviteName = name; })
+    .catch((e) => returnToMenu("接続に失敗しました: " + e.message));
+}
+
+// ルームが出来た時点で招待を送る（room_created を受けてから呼ばれる）
+function sendPendingInvite(code) {
+  if (!pendingInviteName) return;
+  // 招待の結果は renderRoom が毎回書き直す欄に出るので、変数に覚えさせて合成する
+  if (lobbyWs && lobbyWs.readyState === WebSocket.OPEN) {
+    lobbyWs.send(JSON.stringify({ type: "friend_invite", to: pendingInviteName, code }));
+    inviteSentNotice = `${pendingInviteName} さんを招待しました。参加を待っています…`;
+  } else {
+    inviteSentNotice = "サーバーに繋がっていないため招待を送れませんでした。コードを直接伝えてください。";
+  }
+  pendingInviteName = null;
+}
+
+// 招待を受け取ったとき
+const invitePanelEl = document.getElementById("invitePanel");
+const inviteMessageEl = document.getElementById("inviteMessage");
+let invitedCode = null;
+
+function showInvite(from, code) {
+  invitedCode = code;
+  inviteMessageEl.textContent = `${from} さんがルーム（コード: ${code}）に招待しています。`;
+  invitePanelEl.classList.add("active");
+}
+
+document.getElementById("inviteAccept").addEventListener("click", () => {
+  invitePanelEl.classList.remove("active");
+  if (!invitedCode) return;
+  mode = "online";
+  waitingTextEl.textContent = "接続しています…";
+  showScreen("waiting");
+  connectWS({ type: "join_room", code: invitedCode, name: loadPlayerName() || "名無しさん" }).catch((e) => {
+    returnToMenu("接続に失敗しました: " + e.message);
+  });
+  invitedCode = null;
+});
+
+document.getElementById("inviteDecline").addEventListener("click", () => {
+  invitePanelEl.classList.remove("active");
+  invitedCode = null;
+});
+
+// サーバーアドレスを書き換えたら、そちらのロビーへ繋ぎ直す
+serverUrlInputEl.addEventListener("change", () => {
+  lobbyReconnectDelay = LOBBY_RECONNECT_MIN_MS;
+  connectLobby();
+});
+
+connectLobby();
+
 function leaveOnlineMatch() {
   if (ws) {
     sendNet({ type: "leave_match" });
@@ -2580,8 +3185,14 @@ function leaveOnlineMatch() {
     ws = null;
   }
   chatBoxEl.classList.remove("active");
+  showSpectateNotice(false);
   queuedForRandomMatch = false;
   waitingAircraftChoice = null;
+  myNetId = null;
+  matchRoster = [];
+  opponentName = null;
+  pendingInviteName = null;
+  inviteSentNotice = "";
 }
 
 function handleServerDisconnect() {
@@ -2596,25 +3207,34 @@ function handleServerDisconnect() {
 function handleServerMessage(msg) {
   switch (msg.type) {
     case "queued":
-      waitingTextEl.textContent = "対戦相手を探しています…";
+      waitingTextEl.textContent = msg.size > 1
+        ? `チーム戦の対戦相手を探しています…（${msg.count || 1}/${msg.size * 2}人）`
+        : "対戦相手を探しています…";
       break;
     case "room_created":
-      waitingTextEl.textContent =
-        `ルームコード: ${msg.code}\nこのコードを相手に伝えて「ルームに参加」してもらってください。\n（待機中…）`;
+      showScreen("room");
+      sendPendingInvite(msg.code); // フレンド招待からの部屋作成なら、ここでコードを送る
       break;
     case "room_error":
       showScreen("joinRoom");
       joinRoomNoteEl.textContent = msg.message || "参加に失敗しました。";
       if (ws) { ws.close(); ws = null; }
       break;
-    case "matched": {
-      onlineSide = msg.side;
-      matchCategory = msg.category === "prop" ? "prop" : "jet"; // 部屋作成者/ランダムマッチのキューが決めたカテゴリをサーバーから受け取る
-      opponentAircraftChoice = null;
-      opponentName = null;
+    case "room_update":
+      // 部屋の顔ぶれが変わるたびに届く（開戦後はもう届かない）。
+      // 参加した直後の「接続中…」画面から、この時点でルーム画面へ移す。
+      myNetId = msg.you;
+      renderRoom(msg);
+      showScreen("room");
+      break;
+    case "match_ready": {
+      // 部屋のメンバーが確定し、これから機体選択に入る
+      myNetId = msg.you;
+      matchRoster = msg.players || [];
+      matchCategory = msg.category === "prop" ? "prop" : "jet";
+      opponentName = nameOfSoleOpponent();
       // ランダムマッチ待機中はAIモード(mode==="ai")として振る舞っているので、
-      // マッチが成立した時点で必ずオンラインモードへ切り替える
-      // （まだ練習機体を選んでいなかった場合も含め、ここで確実に戻す）。
+      // マッチが成立した時点で必ずオンラインモードへ切り替える。
       const hadWaitingChoice = queuedForRandomMatch && waitingAircraftChoice;
       queuedForRandomMatch = false;
       mode = "online";
@@ -2624,84 +3244,143 @@ function handleServerMessage(msg) {
         myAircraftChoice = waitingAircraftChoice;
         sendNet({ type: "select_aircraft", aircraft: myAircraftChoice, name: loadPlayerName() || "名無しさん" });
         waitingTextEl.textContent =
-          `対戦相手が見つかりました！自分の機体（${AIRCRAFT_DB[myAircraftChoice].label}）を送信しました。相手の準備を待っています…`;
+          `対戦相手が見つかりました！自分の機体（${AIRCRAFT_DB[myAircraftChoice].label}）を送信しました。ほかの参加者を待っています…`;
         showScreen("waiting");
       } else {
         myAircraftChoice = null;
-        showAircraftSelect("対戦相手が見つかりました！機体を選んでください。");
+        showAircraftSelect(matchRoster.length > 2
+          ? "チーム戦の参加者が揃いました！機体を選んでください。"
+          : "対戦相手が見つかりました！機体を選んでください。");
       }
       break;
     }
-    case "opponent_selected":
-      opponentAircraftChoice = msg.aircraft;
-      opponentName = msg.name || null;
-      if (mode === "online") {
-        const note = `対戦相手: ${opponentName ? opponentName + " / " : ""}${AIRCRAFT_DB[msg.aircraft].label}`;
-        selectNoteEl.textContent = note;
-        if (myAircraftChoice) selectStatusEl.textContent = "対戦相手の準備を待っています…";
-      }
+    case "roster_update":
+      // 誰がどの機体を選んだかの途中経過
+      matchRoster = msg.players || [];
+      opponentName = nameOfSoleOpponent();
+      if (mode === "online") renderRosterProgress();
       break;
     case "start":
+      matchRoster = msg.players || matchRoster;
+      opponentName = nameOfSoleOpponent();
       startOnlineMatch();
       break;
     case "state":
-      onRemoteState(msg.data);
+      onRemoteState(msg.id, msg.data);
       break;
     case "chat":
       appendChatLine(msg.name || "対戦相手", msg.text, false);
       break;
-    case "opponent_died":
-      if (mode === "online" && running && !gameOver) endGame(true);
+    case "player_died": {
+      const c = combatantByNetId(msg.id);
+      if (c) {
+        killCombatant(c);
+        if (running && !gameOver) appendChatLine("SYSTEM", `${c.name || "対戦相手"} が撃墜されました`, false);
+      }
+      break;
+    }
+    case "match_over":
+      if (mode === "online" && running && !gameOver) {
+        endGame(msg.winTeam === myTeam(), msg.reason);
+      }
+      break;
+    case "player_left":
+      if (mode === "online") {
+        const c = combatantByNetId(msg.id);
+        if (c && running && !gameOver) {
+          killCombatant(c); // 途中退出は撃墜と同じ扱い（残った機体で決着まで続ける）
+          appendChatLine("SYSTEM", `${c.name || "対戦相手"} が退出しました`, false);
+        }
+      }
       break;
     case "rematch_ready":
       myAircraftChoice = null;
-      opponentAircraftChoice = null;
-      opponentName = null;
-      remoteState = null;
-      showAircraftSelect("同じ相手ともう一度！機体を選んでください。");
+      matchRoster = msg.players || matchRoster;
+      combatants.forEach((c) => { c.remote = null; });
+      showAircraftSelect("同じメンバーでもう一度！機体を選んでください。");
       break;
-    case "opponent_left":
+    case "room_closed":
       if (mode === "online") {
         if (ws) { ws.close(); ws = null; }
         if (running && !gameOver) {
-          endGame(null, "相手が退出しました。");
+          endGame(null, msg.message || "対戦が終了しました。");
         } else if (screens.gameOver.classList.contains("active")) {
-          // 撃墜後、再戦を待っている間に相手が退出した場合
           btnPrimaryEl.disabled = true;
           btnPrimaryEl.textContent = "対戦相手が退出しました";
           msgBody.textContent += "（相手が退出したため再戦はできません）";
         } else {
-          returnToMenu("相手が退出しました。");
+          returnToMenu(msg.message || "相手が退出しました。");
         }
       }
       break;
   }
 }
 
+// 自分のチーム（roster から引く。まだ roster が無い間は "A" 扱い）
+function myTeam() {
+  const me = matchRoster.find((p) => p.id === myNetId);
+  return me && me.team === "B" ? "B" : "A";
+}
+
+function combatantByNetId(id) {
+  return combatants.find((c) => c.netId === id) || null;
+}
+
+// 1対1のときだけ「対戦相手の名前」を既存の表示（ENEMYパネル等）に流用する
+function nameOfSoleOpponent() {
+  const foes = matchRoster.filter((p) => p.id !== myNetId);
+  return foes.length === 1 ? (foes[0].name || null) : null;
+}
+
+// 機体選択画面で、誰が選び終わったかを出す
+function renderRosterProgress() {
+  const foes = matchRoster.filter((p) => p.id !== myNetId);
+  if (matchRoster.length <= 2) {
+    const foe = foes[0];
+    if (foe && foe.aircraft) {
+      selectNoteEl.textContent = `対戦相手: ${foe.name ? foe.name + " / " : ""}${AIRCRAFT_DB[foe.aircraft].label}`;
+    }
+  } else {
+    const mine = myTeam();
+    const line = (p) =>
+      `${p.team === mine ? "味方" : "敵"} ${p.name || "名無しさん"}: ${p.aircraft ? AIRCRAFT_DB[p.aircraft].label : "選択中…"}`;
+    selectNoteEl.textContent = matchRoster.filter((p) => p.id !== myNetId).map(line).join("\n");
+  }
+  const remaining = matchRoster.filter((p) => !p.aircraft).length;
+  if (myAircraftChoice) {
+    selectStatusEl.textContent = remaining > 0
+      ? `ほかの参加者を待っています…（残り${remaining}人）`
+      : "まもなく開始します…";
+  }
+}
+
 // --- 14-5. 敵機の状態をネットワークから受信・送信する ---
-function onRemoteState(data) {
-  if (!remoteState) {
-    remoteState = {
+function onRemoteState(id, data) {
+  const c = combatantByNetId(id);
+  if (!c) return; // 開始直後などで、まだその機体を作っていない場合
+  if (!c.remote) {
+    c.remote = {
       position: new THREE.Vector3().fromArray(data.p),
       quat: new THREE.Quaternion().fromArray(data.q),
       velocity: new THREE.Vector3().fromArray(data.v),
       throttle: data.thr, airbrake: data.ab, alive: data.alive, hud: data.hud || {},
     };
   } else {
-    remoteState.position.fromArray(data.p);
-    remoteState.quat.fromArray(data.q);
-    remoteState.velocity.fromArray(data.v);
-    remoteState.throttle = data.thr;
-    remoteState.airbrake = data.ab;
-    remoteState.alive = data.alive;
-    remoteState.hud = data.hud || {};
+    c.remote.position.fromArray(data.p);
+    c.remote.quat.fromArray(data.q);
+    c.remote.velocity.fromArray(data.v);
+    c.remote.throttle = data.thr;
+    c.remote.airbrake = data.ab;
+    c.remote.alive = data.alive;
+    c.remote.hud = data.hud || {};
   }
 }
 
 // 受信した相手機の状態へ滑らかに補間する（送信レート20Hzのカクつきを補うため）。
 // 姿勢・位置さえ合っていれば、既存の弾道シミュレーション（12章）はそのまま使い回せる。
 function applyRemoteState(state, dt) {
-  if (!remoteState) return; // まだ相手の状態を受信していない（マッチ直後の一瞬だけ）
+  const remoteState = state.remote;
+  if (!remoteState || state.deathHandled) return; // 受信前（マッチ直後の一瞬）と撃墜後は何もしない
   const rate = 1 - Math.exp(-dt * 12);
   state.position.lerp(remoteState.position, rate);
   state.quat.slerp(remoteState.quat, rate);
@@ -2741,6 +3420,61 @@ function sendPlayerState() {
   });
 }
 
+// --- 14-5b. ルーム画面（フレンド戦の待合室） ---
+const roomCodeDisplayEl = document.getElementById("roomCodeDisplay");
+const roomListEls = { A: document.getElementById("roomListA"), B: document.getElementById("roomListB") };
+const roomStatusNoteEl = document.getElementById("roomStatusNote");
+const btnRoomStartEl = document.getElementById("btnRoomStart");
+const MAX_PER_TEAM = 4;
+
+function renderRoom(info) {
+  roomCodeDisplayEl.textContent = info.code || "----";
+  ["A", "B"].forEach((team) => {
+    const ul = roomListEls[team];
+    ul.innerHTML = "";
+    const members = (info.players || []).filter((p) => p.team === team);
+    members.forEach((p) => {
+      const li = document.createElement("li");
+      if (p.id === info.you) li.className = "self";
+      li.textContent = p.name || "名無しさん";
+      if (p.id === info.host) {
+        const mark = document.createElement("span");
+        mark.className = "hostMark";
+        mark.textContent = "（ホスト）";
+        li.appendChild(mark);
+      }
+      ul.appendChild(li);
+    });
+    for (let i = members.length; i < MAX_PER_TEAM; i++) {
+      const li = document.createElement("li");
+      li.innerHTML = '<span class="emptySlot">空き</span>';
+      ul.appendChild(li);
+    }
+  });
+
+  const isHost = info.you === info.host;
+  const bothTeamsFilled = ["A", "B"].every((t) => (info.players || []).some((p) => p.team === t));
+  btnRoomStartEl.style.display = isHost ? "" : "none";
+  btnRoomStartEl.disabled = !bothTeamsFilled;
+  if ((info.players || []).length > 1) inviteSentNotice = ""; // 誰か来たら招待中の案内は消す
+  const baseNote = !bothTeamsFilled
+    ? "両チームに1人以上必要です。"
+    : (isHost ? "全員揃ったら「対戦開始」を押してください。" : "ホストが開始するのを待っています…");
+  roomStatusNoteEl.textContent = (inviteSentNotice ? inviteSentNotice + "\n" : "") + baseNote;
+}
+
+document.getElementById("btnRoomSwitchTeam").addEventListener("click", () => {
+  sendNet({ type: "switch_team" });
+});
+
+btnRoomStartEl.addEventListener("click", () => {
+  sendNet({ type: "room_start" });
+});
+
+document.getElementById("btnRoomLeave").addEventListener("click", () => {
+  returnToMenu();
+});
+
 // --- 14-6. メニュー操作 ---
 document.getElementById("btnVsAI").addEventListener("click", () => {
   mode = "ai";
@@ -2751,6 +3485,12 @@ document.getElementById("btnRandomMatch").addEventListener("click", () => {
   mode = "online";
   pendingOnlineAction = "random";
   showCategorySelect();
+});
+
+document.getElementById("btnRandomTeamMatch").addEventListener("click", () => {
+  mode = "online";
+  pendingOnlineAction = "randomTeam";
+  showCategorySelect("4対4のチーム戦です。使う機体のカテゴリを選んでください。");
 });
 
 document.getElementById("btnCreateRoom").addEventListener("click", () => {
@@ -2775,7 +3515,7 @@ document.getElementById("btnJoinRoomGo").addEventListener("click", () => {
   mode = "online";
   waitingTextEl.textContent = "接続しています…";
   showScreen("waiting");
-  connectWS({ type: "join_room", code }).catch((e) => {
+  connectWS({ type: "join_room", code, name: loadPlayerName() || "名無しさん" }).catch((e) => {
     mode = null;
     joinRoomNoteEl.textContent = "接続に失敗しました: " + e.message;
     showScreen("joinRoom");
@@ -2855,6 +3595,9 @@ playerNameInputEl.value = loadPlayerName();
 playerNameInputEl.addEventListener("change", () => {
   savePlayerName(playerNameInputEl.value);
   fetchAndShowRank();
+  if (lobbyWs && lobbyWs.readyState === WebSocket.OPEN) {
+    lobbyWs.send(JSON.stringify({ type: "lobby_rename", name: loadPlayerName() || "名無しさん" }));
+  }
 });
 
 // --- 緩いランク（勝率ベースの称号、オンライン対戦のみ集計） ---
@@ -2894,6 +3637,7 @@ const GAMEPLAY_TIPS = [
   "超音速域では空力抵抗が急激に増えるので、高高度での一撃離脱は加速だけに頼ると息切れします。",
   "設定画面（⚙）ではキー操作の変更・プレイヤー名の設定・戦績の確認ができます。",
   "オンライン対戦中はTキー（既定）でチャット欄を開けます。",
+  "トップメニューのグローバルチャットで、対戦相手を募集したり雑談したりできます。",
 ];
 let tipIndex = 0;
 const tipDisplayEl = document.getElementById("tipDisplay");
@@ -2976,6 +3720,7 @@ settingsBtnEl.addEventListener("click", () => {
   awaitingKeyFor = null;
   renderKeyBindRows();
   fetchAndShowRank();
+  renderFriendList();
   settingsPanelEl.classList.add("active");
 });
 
