@@ -291,20 +291,76 @@
   #lobbyChatInput:focus { border-color: #06d6a0; }
   #lobbyChatInput:disabled { opacity: 0.5; }
 
-  /* ルーム（フレンド戦の待合室）とチーム表示 */
-  #roomTeams { display: flex; gap: 10px; margin-top: 12px; text-align: left; }
-  .roomTeam {
-    flex: 1; border: 1px solid #345; border-radius: 8px; padding: 8px 10px;
-    background: rgba(255,255,255,0.04);
+  /* ============================================================
+     ルーム（フレンド戦の待合室）：他のメニュー画面と共有する幅560pxの
+     細い箱には収めず、専用の広いレイアウトを別途用意する。
+     4対4だと最大8人分のロスターが並ぶため、詰めて見づらくならないように。
+     ============================================================ */
+  #roomScreen {
+    position: absolute; inset: 0; display: none; z-index: 200;
+    align-items: center; justify-content: center; pointer-events: none;
   }
-  .roomTeam h2 { margin: 0 0 6px; font-size: 13px; letter-spacing: 1px; }
-  .roomTeam.teamA h2 { color: #06d6a0; }
-  .roomTeam.teamB h2 { color: #ffd166; }
-  .roomTeam ul { list-style: none; margin: 0; padding: 0; font-size: 13px; line-height: 1.8; min-height: 3.6em; }
-  .roomTeam li.self { color: #fff; font-weight: bold; }
-  .roomTeam li .hostMark { color: #ffd166; font-size: 11px; }
-  .roomTeam li .emptySlot { color: #567; }
-  #roomCodeDisplay { color: #ffd166; letter-spacing: 6px; }
+  #roomScreen.active { display: flex; }
+  #roomPanel {
+    pointer-events: auto; width: min(880px, 94vw); max-height: 92vh; overflow-y: auto;
+    background: rgba(10,16,20,0.97); border: 1px solid #345; border-radius: 14px;
+    padding: 22px 28px; box-shadow: 0 12px 60px rgba(0,0,0,0.6);
+  }
+  #roomHeader { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .roomCodeLabel { font-size: 11px; color: #9fd6b0; letter-spacing: 2px; }
+  #roomCodeRow { display: flex; align-items: center; gap: 10px; }
+  #roomCodeDisplay { font-size: 30px; font-weight: bold; color: #ffd166; letter-spacing: 8px; }
+  #roomCodeCopyBtn {
+    background: #3a4750; border: none; border-radius: 6px; color: #eafff0;
+    font-size: 12px; padding: 5px 10px; cursor: pointer;
+  }
+  #roomCodeCopyBtn:hover { background: #4a5a66; }
+  #roomCategoryLabel { font-size: 13px; color: #9fd6b0; text-align: right; }
+  #roomNote { font-size: 13px; color: #cde; margin: 10px 0 0; text-align: left; }
+
+  #roomTeams { display: flex; align-items: stretch; gap: 14px; margin-top: 16px; text-align: left; }
+  .roomTeamPanel {
+    flex: 1; border: 1px solid #345; border-radius: 10px; padding: 12px 14px;
+    background: rgba(255,255,255,0.03);
+  }
+  .roomTeamPanel.teamA { border-color: #0a5c48; }
+  .roomTeamPanel.teamB { border-color: #6b5a1f; }
+  .roomTeamHeader { font-size: 14px; font-weight: bold; letter-spacing: 1px; margin-bottom: 10px; }
+  .roomTeamPanel.teamA .roomTeamHeader { color: #06d6a0; }
+  .roomTeamPanel.teamB .roomTeamHeader { color: #ffd166; }
+  .roomTeamSub { font-size: 11px; font-weight: normal; color: #789; letter-spacing: 0; }
+  .roomVs {
+    align-self: center; font-size: 13px; font-weight: bold; color: #567;
+    letter-spacing: 2px; padding: 0 2px;
+  }
+  .roomSlots { display: flex; flex-direction: column; gap: 6px; }
+  .roomSlot {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px solid #234; border-radius: 8px; padding: 7px 10px;
+    background: rgba(255,255,255,0.02);
+  }
+  .roomSlot.filled.self { border-color: #06d6a0; background: rgba(6,214,160,0.08); }
+  .roomSlot.empty { border-style: dashed; opacity: 0.5; }
+  .roomSlotAvatar {
+    width: 26px; height: 26px; border-radius: 50%; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: bold; color: #012;
+    background: #567;
+  }
+  .roomTeamPanel.teamA .roomSlot.filled .roomSlotAvatar { background: #06d6a0; }
+  .roomTeamPanel.teamB .roomSlot.filled .roomSlotAvatar { background: #ffd166; }
+  .roomSlotName { font-size: 13px; flex: 1; }
+  .roomSlot.filled.self .roomSlotName { font-weight: bold; color: #fff; }
+  .roomSlotHostMark {
+    font-size: 10px; color: #ffd166; border: 1px solid #ffd166; border-radius: 3px;
+    padding: 1px 5px; margin-left: 6px; letter-spacing: 1px;
+  }
+  .roomButtons { margin-top: 18px; }
+
+  @media (max-width: 700px) {
+    #roomTeams { flex-direction: column; }
+    .roomVs { display: none; }
+  }
 
   /* フレンド一覧（設定パネル内） */
   .friendNote { color: #6a8; font-size: 11px; line-height: 1.6; margin: 0 0 8px; }
@@ -576,21 +632,6 @@
       <p class="menuNote" id="joinRoomNote"></p>
     </div>
 
-    <div class="screen" id="screenRoom">
-      <h1>ルーム: <span id="roomCodeDisplay"></span></h1>
-      <p id="roomNote">このコードを相手に伝えて「ルームに参加」してもらってください。</p>
-      <div id="roomTeams">
-        <div class="roomTeam teamA"><h2>TEAM A（北から出撃）</h2><ul id="roomListA"></ul></div>
-        <div class="roomTeam teamB"><h2>TEAM B（南から出撃）</h2><ul id="roomListB"></ul></div>
-      </div>
-      <div class="menuButtons">
-        <button class="menuBtn secondary" id="btnRoomSwitchTeam">チームを移る</button>
-        <button class="menuBtn" id="btnRoomStart">対戦開始</button>
-        <button class="menuBtn secondary" id="btnRoomLeave">ルームを出る</button>
-      </div>
-      <p class="menuNote" id="roomStatusNote"></p>
-    </div>
-
     <div class="screen" id="screenWaiting">
       <h1>接続中…</h1>
       <p id="waitingText"></p>
@@ -619,6 +660,43 @@
     </div>
 
     <p id="tipDisplay" class="tipDisplay"></p>
+  </div>
+
+  <!-- ルーム（フレンド戦の待合室）は他のメニュー画面と共有する細い箱には収めず、
+       専用の広いレイアウトにしている（4対4だと最大8人分のロスターが並ぶため）。 -->
+  <div id="roomScreen">
+    <div id="roomPanel">
+      <div id="roomHeader">
+        <div>
+          <div class="roomCodeLabel">ルームコード</div>
+          <div id="roomCodeRow">
+            <span id="roomCodeDisplay"></span>
+            <button id="roomCodeCopyBtn" title="コードをコピー">コピー</button>
+          </div>
+        </div>
+        <div id="roomCategoryLabel"></div>
+      </div>
+      <p id="roomNote">このコードを相手に伝えて「ルームに参加」してもらってください。</p>
+
+      <div id="roomTeams">
+        <div class="roomTeamPanel teamA">
+          <div class="roomTeamHeader">TEAM A <span class="roomTeamSub">（北から出撃）</span></div>
+          <div class="roomSlots" id="roomSlotsA"></div>
+        </div>
+        <div class="roomVs">VS</div>
+        <div class="roomTeamPanel teamB">
+          <div class="roomTeamHeader">TEAM B <span class="roomTeamSub">（南から出撃）</span></div>
+          <div class="roomSlots" id="roomSlotsB"></div>
+        </div>
+      </div>
+
+      <div class="menuButtons roomButtons">
+        <button class="menuBtn secondary" id="btnRoomSwitchTeam">チームを移る</button>
+        <button class="menuBtn" id="btnRoomStart">対戦開始</button>
+        <button class="menuBtn secondary" id="btnRoomLeave">ルームを出る</button>
+      </div>
+      <p class="menuNote" id="roomStatusNote"></p>
+    </div>
   </div>
 </div>
 
@@ -2538,12 +2616,22 @@ const screens = {
   menu: document.getElementById("screenMenu"),
   category: document.getElementById("screenCategorySelect"),
   joinRoom: document.getElementById("screenJoinRoom"),
-  room: document.getElementById("screenRoom"),
   waiting: document.getElementById("screenWaiting"),
   select: document.getElementById("screenAircraftSelect"),
   gameOver: document.getElementById("screenGameOver"),
 };
+// ルーム画面だけは #center-message の細い箱を共有せず、専用の広いレイアウト
+// （#roomScreen）を別途持っている。表示切り替えはここで一本化する。
+const roomScreenEl = document.getElementById("roomScreen");
 function showScreen(name) {
+  if (name === "room") {
+    Object.values(screens).forEach((el) => el.classList.remove("active"));
+    centerMsg.style.display = "none";
+    roomScreenEl.classList.add("active");
+    setSideAdsVisible(false);
+    return;
+  }
+  roomScreenEl.classList.remove("active");
   Object.values(screens).forEach((el) => el.classList.remove("active"));
   screens[name].classList.add("active");
   centerMsg.style.display = "block";
@@ -2551,6 +2639,7 @@ function showScreen(name) {
 }
 function hideCenterMessage() {
   centerMsg.style.display = "none";
+  roomScreenEl.classList.remove("active");
   setSideAdsVisible(false);
 }
 
@@ -3422,33 +3511,55 @@ function sendPlayerState() {
 
 // --- 14-5b. ルーム画面（フレンド戦の待合室） ---
 const roomCodeDisplayEl = document.getElementById("roomCodeDisplay");
-const roomListEls = { A: document.getElementById("roomListA"), B: document.getElementById("roomListB") };
+const roomCategoryLabelEl = document.getElementById("roomCategoryLabel");
+const roomSlotEls = { A: document.getElementById("roomSlotsA"), B: document.getElementById("roomSlotsB") };
 const roomStatusNoteEl = document.getElementById("roomStatusNote");
 const btnRoomStartEl = document.getElementById("btnRoomStart");
 const MAX_PER_TEAM = 4;
 
+function buildRoomSlot(player, isSelf, isHostSlot) {
+  const slot = document.createElement("div");
+  const avatar = document.createElement("div");
+  avatar.className = "roomSlotAvatar";
+  const nameEl = document.createElement("div");
+  nameEl.className = "roomSlotName";
+
+  if (player) {
+    const name = player.name || "名無しさん";
+    slot.className = "roomSlot filled" + (isSelf ? " self" : "");
+    avatar.textContent = name.slice(0, 1);
+    nameEl.textContent = name;
+    if (isHostSlot) {
+      const mark = document.createElement("span");
+      mark.className = "roomSlotHostMark";
+      mark.textContent = "HOST";
+      nameEl.appendChild(mark);
+    }
+  } else {
+    slot.className = "roomSlot empty";
+    avatar.textContent = "−";
+    nameEl.textContent = "空き";
+  }
+
+  slot.append(avatar, nameEl);
+  return slot;
+}
+
 function renderRoom(info) {
+  // ルームは人数固定ではなく、両チーム最大4人まで自由に増減できる（ホストが開始するまで）
   roomCodeDisplayEl.textContent = info.code || "----";
+  const playerCount = (info.players || []).length;
+  roomCategoryLabelEl.textContent =
+    `${CATEGORY_LABEL[info.category] || ""} ／ ${playerCount}/${MAX_PER_TEAM * 2}人`;
   ["A", "B"].forEach((team) => {
-    const ul = roomListEls[team];
-    ul.innerHTML = "";
+    const container = roomSlotEls[team];
+    container.innerHTML = "";
     const members = (info.players || []).filter((p) => p.team === team);
     members.forEach((p) => {
-      const li = document.createElement("li");
-      if (p.id === info.you) li.className = "self";
-      li.textContent = p.name || "名無しさん";
-      if (p.id === info.host) {
-        const mark = document.createElement("span");
-        mark.className = "hostMark";
-        mark.textContent = "（ホスト）";
-        li.appendChild(mark);
-      }
-      ul.appendChild(li);
+      container.appendChild(buildRoomSlot(p, p.id === info.you, p.id === info.host));
     });
     for (let i = members.length; i < MAX_PER_TEAM; i++) {
-      const li = document.createElement("li");
-      li.innerHTML = '<span class="emptySlot">空き</span>';
-      ul.appendChild(li);
+      container.appendChild(buildRoomSlot(null, false, false));
     }
   });
 
@@ -3462,6 +3573,17 @@ function renderRoom(info) {
     : (isHost ? "全員揃ったら「対戦開始」を押してください。" : "ホストが開始するのを待っています…");
   roomStatusNoteEl.textContent = (inviteSentNotice ? inviteSentNotice + "\n" : "") + baseNote;
 }
+
+const roomCodeCopyBtnEl = document.getElementById("roomCodeCopyBtn");
+roomCodeCopyBtnEl.addEventListener("click", () => {
+  const code = roomCodeDisplayEl.textContent;
+  if (!code || !navigator.clipboard) return;
+  navigator.clipboard.writeText(code).then(() => {
+    const original = roomCodeCopyBtnEl.textContent;
+    roomCodeCopyBtnEl.textContent = "コピーしました";
+    setTimeout(() => { roomCodeCopyBtnEl.textContent = original; }, 1500);
+  }).catch(() => {});
+});
 
 document.getElementById("btnRoomSwitchTeam").addEventListener("click", () => {
   sendNet({ type: "switch_team" });
