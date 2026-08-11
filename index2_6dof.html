@@ -718,6 +718,9 @@
 // 11. HUDインジケーター更新（敵機マーカー／ADI）
 // 12. 弾道シミュレーション・命中判定
 // 13. メインループ・ゲームフロー
+// 14. 画面・メニュー（phase／画面切り替え／機体選択／ルーム画面／メニュー操作）
+// 15. オンライン対戦の通信（対戦用ソケット／グローバルチャット／フレンド／状態同期）
+// 16. フィードバック送信
 // ================================================================
 
 
@@ -2609,9 +2612,11 @@ setInterval(animate, 1000 / 60);
 
 
 // ================================================================
-// 14. メニュー・機体選択・オンライン対戦（ランダムマッチ／フレンドマッチ）
+// 14. 画面・メニュー（どの画面を出すか）
 // ================================================================
-// このセクションは「どの画面を出すか」「WebSocketで何を送受信するか」だけを扱う。
+// この章は「どの画面を出すか」だけを扱う。サーバーとのやり取りは15章の担当。
+// 画面を足したいときは 14-0 の PHASES に手順が書いてある。
+//
 // 飛行物理・命中判定は今まで通りローカルで計算し（6〜8, 12章）、オンライン時は
 // 敵機の表示だけをネットワークから受け取った状態に差し替える（applyRemoteState）。
 
@@ -2766,7 +2771,7 @@ let matchCategory = null;   // "jet" | "prop"（この対戦全体で使う機�
 let menuChoice = null;
 
 // ランダムマッチの列に並んでいるか（net.queued）と、待機中の練習機体（net.waitingAircraft）は
-// 対戦を抜けたら消える情報なので、14-4 の net にまとめてある。
+// 対戦を抜けたら消える情報なので、15-1 の net にまとめてある。
 
 function randomAircraftFromCategory(category) {
   const keys = Object.keys(AIRCRAFT_DB).filter((k) => AIRCRAFT_DB[k].category === category);
@@ -2948,7 +2953,169 @@ document.getElementById("btnToMenu").addEventListener("click", () => {
   returnToMenu();
 });
 
-// --- 14-4. WebSocket通信 ---
+// --- 14-4. ルーム画面（フレンド戦の待合室） ---
+const roomCodeDisplayEl = document.getElementById("roomCodeDisplay");
+const roomCategoryLabelEl = document.getElementById("roomCategoryLabel");
+const roomSlotEls = { A: document.getElementById("roomSlotsA"), B: document.getElementById("roomSlotsB") };
+const roomStatusNoteEl = document.getElementById("roomStatusNote");
+const btnRoomStartEl = document.getElementById("btnRoomStart");
+const MAX_PER_TEAM = 4;
+
+function buildRoomSlot(player, isSelf, isHostSlot) {
+  const slot = document.createElement("div");
+  const avatar = document.createElement("div");
+  avatar.className = "roomSlotAvatar";
+  const nameEl = document.createElement("div");
+  nameEl.className = "roomSlotName";
+
+  if (player) {
+    const name = player.name || "名無しさん";
+    slot.className = "roomSlot filled" + (isSelf ? " self" : "");
+    avatar.textContent = name.slice(0, 1);
+    nameEl.textContent = name;
+    if (isHostSlot) {
+      const mark = document.createElement("span");
+      mark.className = "roomSlotHostMark";
+      mark.textContent = "HOST";
+      nameEl.appendChild(mark);
+    }
+  } else {
+    slot.className = "roomSlot empty";
+    avatar.textContent = "−";
+    nameEl.textContent = "空き";
+  }
+
+  slot.append(avatar, nameEl);
+  return slot;
+}
+
+function renderRoom(info) {
+  // ルームは人数固定ではなく、両チーム最大4人まで自由に増減できる（ホストが開始するまで）
+  roomCodeDisplayEl.textContent = info.code || "----";
+  const playerCount = (info.players || []).length;
+  roomCategoryLabelEl.textContent =
+    `${CATEGORY_LABEL[info.category] || ""} ／ ${playerCount}/${MAX_PER_TEAM * 2}人`;
+  ["A", "B"].forEach((team) => {
+    const container = roomSlotEls[team];
+    container.innerHTML = "";
+    const members = (info.players || []).filter((p) => p.team === team);
+    members.forEach((p) => {
+      container.appendChild(buildRoomSlot(p, p.id === info.you, p.id === info.host));
+    });
+    for (let i = members.length; i < MAX_PER_TEAM; i++) {
+      container.appendChild(buildRoomSlot(null, false, false));
+    }
+  });
+
+  const isHost = info.you === info.host;
+  const bothTeamsFilled = ["A", "B"].every((t) => (info.players || []).some((p) => p.team === t));
+  btnRoomStartEl.style.display = isHost ? "" : "none";
+  btnRoomStartEl.disabled = !bothTeamsFilled;
+  if ((info.players || []).length > 1) net.inviteSentNotice = ""; // 誰か来たら招待中の案内は消す
+  const baseNote = !bothTeamsFilled
+    ? "両チームに1人以上必要です。"
+    : (isHost ? "全員揃ったら「対戦開始」を押してください。" : "ホストが開始するのを待っています…");
+  roomStatusNoteEl.textContent = (net.inviteSentNotice ? net.inviteSentNotice + "\n" : "") + baseNote;
+}
+
+const roomCodeCopyBtnEl = document.getElementById("roomCodeCopyBtn");
+roomCodeCopyBtnEl.addEventListener("click", () => {
+  const code = roomCodeDisplayEl.textContent;
+  if (!code || !navigator.clipboard) return;
+  navigator.clipboard.writeText(code).then(() => {
+    const original = roomCodeCopyBtnEl.textContent;
+    roomCodeCopyBtnEl.textContent = "コピーしました";
+    setTimeout(() => { roomCodeCopyBtnEl.textContent = original; }, 1500);
+  }).catch(() => {});
+});
+
+document.getElementById("btnRoomSwitchTeam").addEventListener("click", () => {
+  sendNet({ type: "switch_team" });
+});
+
+btnRoomStartEl.addEventListener("click", () => {
+  sendNet({ type: "room_start" });
+});
+
+document.getElementById("btnRoomLeave").addEventListener("click", () => {
+  returnToMenu();
+});
+
+// --- 14-5. メニュー操作（トップメニューのボタン） ---
+document.getElementById("btnVsAI").addEventListener("click", () => {
+  mode = "ai";
+  menuChoice = "ai";
+  showCategorySelect();
+});
+
+document.getElementById("btnRandomMatch").addEventListener("click", () => {
+  mode = "online";
+  menuChoice = "random";
+  showCategorySelect();
+});
+
+document.getElementById("btnRandomTeamMatch").addEventListener("click", () => {
+  mode = "online";
+  menuChoice = "randomTeam";
+  showCategorySelect("4対4のチーム戦です。使う機体のカテゴリを選んでください。");
+});
+
+document.getElementById("btnCreateRoom").addEventListener("click", () => {
+  mode = "online";
+  menuChoice = "create";
+  showCategorySelect();
+});
+
+document.getElementById("btnJoinRoomShow").addEventListener("click", () => {
+  joinRoomNoteEl.textContent = "";
+  roomCodeInputEl.value = "";
+  showScreen("joinRoom");
+});
+
+document.getElementById("btnJoinRoomBack").addEventListener("click", () => {
+  showScreen("menu");
+});
+
+document.getElementById("btnJoinRoomGo").addEventListener("click", () => {
+  const code = roomCodeInputEl.value.trim().toUpperCase();
+  if (!code) return;
+  mode = "online";
+  waitingTextEl.textContent = "接続しています…";
+  showScreen("waiting");
+  connectWS({ type: "join_room", code, name: loadPlayerName() || "名無しさん" }).catch((e) => {
+    mode = null;
+    joinRoomNoteEl.textContent = "接続に失敗しました: " + e.message;
+    showScreen("joinRoom");
+  });
+});
+
+document.getElementById("btnWaitCancel").addEventListener("click", () => {
+  returnToMenu();
+});
+
+document.getElementById("btnSelectBack").addEventListener("click", () => {
+  if (phase === "aiSelectEnemy") {
+    // 敵機選択中の「戻る」は自機選択に戻るだけ（メニューには出ない）
+    startAircraftSelectForPlayer();
+    return;
+  }
+  if (phase === "aiSelectPlayer" && !net.queued) {
+    // 自機選択中の「戻る」はカテゴリ選択に戻る（ランダムマッチ待機中はキュー解除のためメニューに戻す）
+    showCategorySelect();
+    return;
+  }
+  returnToMenu();
+});
+
+// ================================================================
+// 15. オンライン対戦の通信（サーバーと何をやり取りするか）
+// ================================================================
+// ここから下は「サーバーと何を送受信するか」だけを扱う。どの画面を出すかは
+// 14章の担当なので、この章から画面を切り替えたいときは showScreen() を呼ぶこと。
+// 接続はソケットを2本持つ：net.ws（対戦用。抜けるたびに閉じる）と
+// lobby.ws（グローバルチャット用。ずっと繋ぎっぱなし）。
+
+// --- 15-1. 対戦用のWebSocket接続 ---
 // サーバーは「部屋」単位で人を束ねるだけで、飛行物理も命中判定も知らない。
 // 1対1も4対4も同じ「部屋」で表現し、人数とチーム分けだけが違う。
 // この「1回の対戦」に属する情報は、バラバラの変数ではなく net にまとめて持つ。
@@ -3070,7 +3237,7 @@ chatInputEl.addEventListener("keydown", (e) => {
   }
 });
 
-// --- 14-4b. グローバルチャット（トップメニュー画面） ---
+// --- 15-2. グローバルチャット（トップメニュー画面） ---
 // 対戦用の ws とは別に、常時つなぎっぱなしのソケットを1本持つ。対戦の中継処理と
 // 完全に分けておくことで、チャットが落ちても対戦は動き、対戦を抜けてもチャットは
 // 途切れない（メニューに戻るたびに繋ぎ直す必要がない）。
@@ -3206,7 +3373,7 @@ lobbyChatInputEl.addEventListener("keydown", (e) => {
   appendLobbyLine("lobbySelf", myName, text);
 });
 
-// --- 14-4c. フレンド（オンライン状況の表示とルーム招待） ---
+// --- 15-3. フレンド（オンライン状況の表示とルーム招待） ---
 // アカウントの仕組みが無いゲームなので、フレンドは「相手のプレイヤー名を自分の端末に
 // 覚えておくだけ」の軽い仕組み。ロビー（グローバルチャット）に居る名前の一覧を
 // サーバーから受け取り、その中に居ればオンライン表示にする。
@@ -3516,7 +3683,7 @@ function renderRosterProgress() {
   }
 }
 
-// --- 14-5. 敵機の状態をネットワークから受信・送信する ---
+// --- 15-4. 敵機の状態をネットワークから受信・送信する ---
 function onRemoteState(id, data) {
   const c = combatantByNetId(id);
   if (!c) return; // 開始直後などで、まだその機体を作っていない場合
@@ -3582,163 +3749,10 @@ function sendPlayerState() {
   });
 }
 
-// --- 14-5b. ルーム画面（フレンド戦の待合室） ---
-const roomCodeDisplayEl = document.getElementById("roomCodeDisplay");
-const roomCategoryLabelEl = document.getElementById("roomCategoryLabel");
-const roomSlotEls = { A: document.getElementById("roomSlotsA"), B: document.getElementById("roomSlotsB") };
-const roomStatusNoteEl = document.getElementById("roomStatusNote");
-const btnRoomStartEl = document.getElementById("btnRoomStart");
-const MAX_PER_TEAM = 4;
-
-function buildRoomSlot(player, isSelf, isHostSlot) {
-  const slot = document.createElement("div");
-  const avatar = document.createElement("div");
-  avatar.className = "roomSlotAvatar";
-  const nameEl = document.createElement("div");
-  nameEl.className = "roomSlotName";
-
-  if (player) {
-    const name = player.name || "名無しさん";
-    slot.className = "roomSlot filled" + (isSelf ? " self" : "");
-    avatar.textContent = name.slice(0, 1);
-    nameEl.textContent = name;
-    if (isHostSlot) {
-      const mark = document.createElement("span");
-      mark.className = "roomSlotHostMark";
-      mark.textContent = "HOST";
-      nameEl.appendChild(mark);
-    }
-  } else {
-    slot.className = "roomSlot empty";
-    avatar.textContent = "−";
-    nameEl.textContent = "空き";
-  }
-
-  slot.append(avatar, nameEl);
-  return slot;
-}
-
-function renderRoom(info) {
-  // ルームは人数固定ではなく、両チーム最大4人まで自由に増減できる（ホストが開始するまで）
-  roomCodeDisplayEl.textContent = info.code || "----";
-  const playerCount = (info.players || []).length;
-  roomCategoryLabelEl.textContent =
-    `${CATEGORY_LABEL[info.category] || ""} ／ ${playerCount}/${MAX_PER_TEAM * 2}人`;
-  ["A", "B"].forEach((team) => {
-    const container = roomSlotEls[team];
-    container.innerHTML = "";
-    const members = (info.players || []).filter((p) => p.team === team);
-    members.forEach((p) => {
-      container.appendChild(buildRoomSlot(p, p.id === info.you, p.id === info.host));
-    });
-    for (let i = members.length; i < MAX_PER_TEAM; i++) {
-      container.appendChild(buildRoomSlot(null, false, false));
-    }
-  });
-
-  const isHost = info.you === info.host;
-  const bothTeamsFilled = ["A", "B"].every((t) => (info.players || []).some((p) => p.team === t));
-  btnRoomStartEl.style.display = isHost ? "" : "none";
-  btnRoomStartEl.disabled = !bothTeamsFilled;
-  if ((info.players || []).length > 1) net.inviteSentNotice = ""; // 誰か来たら招待中の案内は消す
-  const baseNote = !bothTeamsFilled
-    ? "両チームに1人以上必要です。"
-    : (isHost ? "全員揃ったら「対戦開始」を押してください。" : "ホストが開始するのを待っています…");
-  roomStatusNoteEl.textContent = (net.inviteSentNotice ? net.inviteSentNotice + "\n" : "") + baseNote;
-}
-
-const roomCodeCopyBtnEl = document.getElementById("roomCodeCopyBtn");
-roomCodeCopyBtnEl.addEventListener("click", () => {
-  const code = roomCodeDisplayEl.textContent;
-  if (!code || !navigator.clipboard) return;
-  navigator.clipboard.writeText(code).then(() => {
-    const original = roomCodeCopyBtnEl.textContent;
-    roomCodeCopyBtnEl.textContent = "コピーしました";
-    setTimeout(() => { roomCodeCopyBtnEl.textContent = original; }, 1500);
-  }).catch(() => {});
-});
-
-document.getElementById("btnRoomSwitchTeam").addEventListener("click", () => {
-  sendNet({ type: "switch_team" });
-});
-
-btnRoomStartEl.addEventListener("click", () => {
-  sendNet({ type: "room_start" });
-});
-
-document.getElementById("btnRoomLeave").addEventListener("click", () => {
-  returnToMenu();
-});
-
-// --- 14-6. メニュー操作 ---
-document.getElementById("btnVsAI").addEventListener("click", () => {
-  mode = "ai";
-  menuChoice = "ai";
-  showCategorySelect();
-});
-
-document.getElementById("btnRandomMatch").addEventListener("click", () => {
-  mode = "online";
-  menuChoice = "random";
-  showCategorySelect();
-});
-
-document.getElementById("btnRandomTeamMatch").addEventListener("click", () => {
-  mode = "online";
-  menuChoice = "randomTeam";
-  showCategorySelect("4対4のチーム戦です。使う機体のカテゴリを選んでください。");
-});
-
-document.getElementById("btnCreateRoom").addEventListener("click", () => {
-  mode = "online";
-  menuChoice = "create";
-  showCategorySelect();
-});
-
-document.getElementById("btnJoinRoomShow").addEventListener("click", () => {
-  joinRoomNoteEl.textContent = "";
-  roomCodeInputEl.value = "";
-  showScreen("joinRoom");
-});
-
-document.getElementById("btnJoinRoomBack").addEventListener("click", () => {
-  showScreen("menu");
-});
-
-document.getElementById("btnJoinRoomGo").addEventListener("click", () => {
-  const code = roomCodeInputEl.value.trim().toUpperCase();
-  if (!code) return;
-  mode = "online";
-  waitingTextEl.textContent = "接続しています…";
-  showScreen("waiting");
-  connectWS({ type: "join_room", code, name: loadPlayerName() || "名無しさん" }).catch((e) => {
-    mode = null;
-    joinRoomNoteEl.textContent = "接続に失敗しました: " + e.message;
-    showScreen("joinRoom");
-  });
-});
-
-document.getElementById("btnWaitCancel").addEventListener("click", () => {
-  returnToMenu();
-});
-
-document.getElementById("btnSelectBack").addEventListener("click", () => {
-  if (phase === "aiSelectEnemy") {
-    // 敵機選択中の「戻る」は自機選択に戻るだけ（メニューには出ない）
-    startAircraftSelectForPlayer();
-    return;
-  }
-  if (phase === "aiSelectPlayer" && !net.queued) {
-    // 自機選択中の「戻る」はカテゴリ選択に戻る（ランダムマッチ待機中はキュー解除のためメニューに戻す）
-    showCategorySelect();
-    return;
-  }
-  returnToMenu();
-});
 
 
 // ================================================================
-// 15. フィードバック送信
+// 16. フィードバック送信
 // ================================================================
 // 中継サーバー（server.js）にPOST /feedbackという軽量なエンドポイントを用意しており、
 // ここから送るとサーバー側のfeedback.logに追記される。サーバーに繋がらない/起動していない
