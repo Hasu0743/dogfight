@@ -2470,7 +2470,10 @@ function updateGunSolution(attacker, target, dt) {
 // ================================================================
 // 13. メインループ・ゲームフロー
 // ================================================================
-let mode = null;        // "ai" | "online"（メニューにいる間は null）
+// この対戦の中身が「通信対戦」か「手元で計算するAI戦」か。"ai" | "online"（メニュー中は null）。
+// 画面がどこにあるかは phase（14-0）の担当で、mode は関与しない。
+// ランダムマッチ待ちの練習中は、通信こそ繋いでいても対戦の中身はAI戦なので mode は "ai" が正しい。
+let mode = null;
 let running = false;
 let gameOver = false;
 let lastTime = performance.now();
@@ -2614,8 +2617,10 @@ setInterval(animate, 1000 / 60);
 
 // --- 14-0. 今いる場所（phase） ---
 // 「プレイヤーが今どこにいるか」を、この phase 1つだけで表す。
-// 以前は mode / aiStage / queuedForRandomMatch などに分散していて、
+// 以前は mode / aiStage / queuedForRandomMatch に分散していて、
 // 「今どこか」を知るのに複数の変数を突き合わせる必要があった。
+// 場所の判定は必ず phase を見ること。mode は「対戦の中身が通信かAIか」だけを表し、
+// 画面がどこにあるかとは無関係（ランダムマッチ待ちの練習中は mode==="ai" が正しい）。
 //
 // ■ 新しい画面を足すときの手順（3つだけ）
 //   1. この PHASES に「名前: 説明」を1行足す
@@ -2623,16 +2628,17 @@ setInterval(animate, 1000 / 60);
 //   3. 下の screens と SCREEN_PHASE にそれぞれ1行足す
 // これで showScreen("xxx") が使えるようになり、phase も自動で追従する。
 const PHASES = {
-  menu:         "トップメニュー",
-  category:     "カテゴリ選択",
-  joinRoom:     "ルームコードの入力",
-  connecting:   "サーバー接続中・マッチング待ち",
-  roomLobby:    "ルーム（フレンド戦の待合室）",
-  aiSelect:     "1人プレイの機体選択",
-  onlineSelect: "オンライン対戦の機体選択",
-  aiPlay:       "AI戦をプレイ中",
-  onlinePlay:   "オンライン対戦をプレイ中",
-  gameOver:     "決着画面",
+  menu:           "トップメニュー",
+  category:       "カテゴリ選択",
+  joinRoom:       "ルームコードの入力",
+  connecting:     "サーバー接続中・マッチング待ち",
+  roomLobby:      "ルーム（フレンド戦の待合室）",
+  aiSelectPlayer: "1人プレイ：自機を選ぶ",
+  aiSelectEnemy:  "1人プレイ：敵機を選ぶ",
+  onlineSelect:   "オンライン対戦：機体を選ぶ",
+  aiPlay:         "AI戦をプレイ中",
+  onlinePlay:     "オンライン対戦をプレイ中",
+  gameOver:       "決着画面",
 };
 
 let phase = "menu"; // 初期表示はトップメニュー
@@ -2752,12 +2758,18 @@ function markSelectedCard(key) {
   });
 }
 
-let aiStage = "player";       // "player" | "enemy"（1人プレイの選択ステップ）
 let aiPlayerChoice = null;
-let matchCategory = null;     // "jet" | "prop"（この対戦全体で使う機体カテゴリ）
-let pendingOnlineAction = null; // カテゴリ選択後に何をするか："random" | "create"（"join"はカテゴリ選択を挟まない）
-let queuedForRandomMatch = false; // ランダムマッチのキューに繋いだまま、見つかるまでAIと練習している状態か
-let waitingAircraftChoice = null; // その練習で使っている（＝マッチ成立時にそのまま本番へ送る）自機の機体
+let matchCategory = null;   // "jet" | "prop"（この対戦全体で使う機体カテゴリ）
+
+// メニューで押されたボタン。カテゴリ選択のあと何をするかを決めるためだけに使う。
+// "ai" | "random" | "randomTeam" | "create"（「ルームに参加」はカテゴリ選択を挟まないので該当なし）
+let menuChoice = null;
+
+// ランダムマッチのキューに並んでいるか。これは phase とは別の話で、
+// 「自機を選んでいる最中」でも「AIと練習中」でも、裏で並び続けている＝両方と同時に成り立つ。
+// だから phase に混ぜず、独立した目印として持つ。
+let queued = false;
+let waitingAircraftChoice = null; // 待機中の練習で使っている機体（マッチ成立時にそのまま本番へ送る）
 
 function randomAircraftFromCategory(category) {
   const keys = Object.keys(AIRCRAFT_DB).filter((k) => AIRCRAFT_DB[k].category === category);
@@ -2774,31 +2786,29 @@ function showCategorySelect(note) {
 
 function onCategoryChosen(category) {
   matchCategory = category;
-  if (mode === "ai") {
+  if (menuChoice === "ai") {
     startAircraftSelectForPlayer();
-  } else if (mode === "online") {
-    if (pendingOnlineAction === "random" || pendingOnlineAction === "randomTeam") {
-      // 見つかるまでの間もAIと練習できるように、先にキュー接続だけ済ませておき、
-      // 画面自体はAIモードと同じ「自機を選ぶ」フローに乗せる（敵機はランダムで即開戦）。
-      // これはチーム戦のキュー（8人揃うまで待つ）でも同じ。
-      const teamSize = pendingOnlineAction === "randomTeam" ? 4 : 1;
-      queuedForRandomMatch = true;
-      connectWS({ type: "queue_random", category, size: teamSize, name: loadPlayerName() || "名無しさん" }).catch((e) => {
-        queuedForRandomMatch = false;
-        returnToMenu("接続に失敗しました: " + e.message);
-      });
-      mode = "ai";
-      aiStage = "player";
-      showAircraftSelect(teamSize > 1
-        ? "4対4の参加者を探しています…自分の機体を選ぶと、揃うまでAIと練習できます。"
-        : "対戦相手を探しています…自分の機体を選ぶと、見つかるまでAIと練習できます。");
-    } else if (pendingOnlineAction === "create") {
-      waitingTextEl.textContent = "接続しています…";
-      showScreen("waiting");
-      connectWS({ type: "create_room", category, name: loadPlayerName() || "名無しさん" }).catch((e) => {
-        returnToMenu("接続に失敗しました: " + e.message);
-      });
-    }
+  } else if (menuChoice === "random" || menuChoice === "randomTeam") {
+    // 相手が見つかるまでの間もAIと練習できるように、先にキュー接続だけ済ませておき、
+    // 画面は1人プレイと同じ「自機を選ぶ」流れに乗せる（敵機はランダムで即開戦）。
+    // 対戦の中身はAI戦なので mode は "ai"。キューに並んでいることは queued が覚える。
+    // これはチーム戦のキュー（8人揃うまで待つ）でも同じ。
+    const teamSize = menuChoice === "randomTeam" ? 4 : 1;
+    queued = true;
+    connectWS({ type: "queue_random", category, size: teamSize, name: loadPlayerName() || "名無しさん" }).catch((e) => {
+      queued = false;
+      returnToMenu("接続に失敗しました: " + e.message);
+    });
+    mode = "ai";
+    showAircraftSelect("aiSelectPlayer", teamSize > 1
+      ? "4対4の参加者を探しています…自分の機体を選ぶと、揃うまでAIと練習できます。"
+      : "対戦相手を探しています…自分の機体を選ぶと、見つかるまでAIと練習できます。");
+  } else if (menuChoice === "create") {
+    waitingTextEl.textContent = "接続しています…";
+    showScreen("waiting");
+    connectWS({ type: "create_room", category, name: loadPlayerName() || "名無しさん" }).catch((e) => {
+      returnToMenu("接続に失敗しました: " + e.message);
+    });
   }
 }
 
@@ -2810,54 +2820,45 @@ document.getElementById("btnCategoryBack").addEventListener("click", () => {
 
 // 1人プレイで「自機を選ぶ」ステージへ（再戦時・選択のやり直し時など複数箇所から呼ばれる）
 function startAircraftSelectForPlayer() {
-  aiStage = "player";
-  showAircraftSelect("対戦する自機を選んでください。");
+  showAircraftSelect("aiSelectPlayer", "対戦する自機を選んでください。");
 }
 
 const CATEGORY_LABEL = { jet: "ジェット機", prop: "レシプロ機" };
+const SELECT_TITLE = {
+  aiSelectPlayer: "機体を選択（自機）",
+  aiSelectEnemy:  "機体を選択（敵機 / AI操縦）",
+  onlineSelect:   "機体を選択",
+};
 
-function showAircraftSelect(note) {
+// 機体選択画面はこの3つの場面で使い回すので、どの場面なのかを必ず渡してもらう
+// （呼ぶ側が指定を強制されるので、phase の設定漏れが起こらない）。
+function showAircraftSelect(nextPhase, note) {
+  setPhase(nextPhase);
   buildAircraftGrid(matchCategory);
   const catLabel = CATEGORY_LABEL[matchCategory] || "";
-  if (mode === "ai") {
-    selectTitleEl.textContent =
-      (aiStage === "enemy" ? "機体を選択（敵機 / AI操縦）" : "機体を選択（自機）") + ` - ${catLabel}`;
-  } else {
-    selectTitleEl.textContent = `機体を選択 - ${catLabel}`;
-  }
+  selectTitleEl.textContent = `${SELECT_TITLE[nextPhase] || "機体を選択"} - ${catLabel}`;
   selectNoteEl.textContent = note || "";
   selectStatusEl.textContent = "";
   markSelectedCard(null);
   showScreen("select");
-  // 同じ「機体選択」画面でも、1人プレイとオンラインでは意味が違うので分けて記録する
-  setPhase(mode === "online" ? "onlineSelect" : "aiSelect");
 }
 
 function onAircraftCardClick(key) {
   markSelectedCard(key);
-  if (mode === "ai") {
-    if (aiStage === "player") {
-      aiPlayerChoice = key;
-      if (queuedForRandomMatch) {
-        waitingAircraftChoice = key;
-        resetGame(aiPlayerChoice, randomAircraftFromCategory(matchCategory));
-        running = true;
-        lastTime = performance.now();
-        hideCenterMessage();
-        setPhase("aiPlay"); // マッチが見つかるまでのAI練習
-        return;
-      }
-      aiStage = "enemy";
-      showAircraftSelect("対戦する敵機（AI操縦）を選んでください。");
-    } else {
-      resetGame(aiPlayerChoice, key);
-      running = true;
-      lastTime = performance.now();
-      hideCenterMessage();
-      setPhase("aiPlay");
-      aiStage = "player";
+  if (phase === "aiSelectPlayer") {
+    aiPlayerChoice = key;
+    if (queued) {
+      // マッチが見つかるまでの練習。敵機は選ばせずランダムで即開戦する
+      waitingAircraftChoice = key;
+      resetGame(aiPlayerChoice, randomAircraftFromCategory(matchCategory));
+      startPlaying("aiPlay");
+      return;
     }
-  } else if (mode === "online") {
+    showAircraftSelect("aiSelectEnemy", "対戦する敵機（AI操縦）を選んでください。");
+  } else if (phase === "aiSelectEnemy") {
+    resetGame(aiPlayerChoice, key);
+    startPlaying("aiPlay");
+  } else if (phase === "onlineSelect") {
     myAircraftChoice = key;
     sendNet({ type: "select_aircraft", aircraft: key, name: loadPlayerName() || "名無しさん" });
     selectStatusEl.textContent = "ほかの参加者を待っています…";
@@ -2866,6 +2867,15 @@ function onAircraftCardClick(key) {
 }
 
 // --- 14-3. ゲーム開始・終了画面 ---
+// 対戦開始のときはメニューが消えるため showScreen() を通らない。
+// phase の更新漏れが起きる唯一の場所なので、ここに集約しておく。
+function startPlaying(nextPhase) {
+  running = true;
+  lastTime = performance.now();
+  hideCenterMessage();
+  setPhase(nextPhase);
+}
+
 function startOnlineMatch() {
   // サーバーから配られた roster をそのまま出撃順にする（全員が同じ配列を受け取るので、
   // どの端末でも同じ初期配置になる）。自分の機体だけ control="local" にする。
@@ -2877,10 +2887,7 @@ function startOnlineMatch() {
     name: p.id === myNetId ? null : (p.name || null),
   })));
   stateSendAccum = 0;
-  running = true;
-  lastTime = performance.now();
-  hideCenterMessage();
-  setPhase("onlinePlay");
+  startPlaying("onlinePlay");
   resetChat();
   chatBoxEl.classList.add("active");
 }
@@ -3330,7 +3337,7 @@ function leaveOnlineMatch() {
   }
   chatBoxEl.classList.remove("active");
   showSpectateNotice(false);
-  queuedForRandomMatch = false;
+  queued = false;
   waitingAircraftChoice = null;
   myNetId = null;
   matchRoster = [];
@@ -3377,10 +3384,10 @@ function handleServerMessage(msg) {
       matchRoster = msg.players || [];
       matchCategory = msg.category === "prop" ? "prop" : "jet";
       opponentName = nameOfSoleOpponent();
-      // ランダムマッチ待機中はAIモード(mode==="ai")として振る舞っているので、
-      // マッチが成立した時点で必ずオンラインモードへ切り替える。
-      const hadWaitingChoice = queuedForRandomMatch && waitingAircraftChoice;
-      queuedForRandomMatch = false;
+      // ここまでの練習は手元計算のAI戦だった（mode==="ai"）。マッチが成立したので、
+      // この時点で対戦の中身が通信対戦に変わる。キューからも外れる。
+      const hadWaitingChoice = queued && waitingAircraftChoice;
+      queued = false;
       mode = "online";
       running = false;
       if (hadWaitingChoice) {
@@ -3392,7 +3399,7 @@ function handleServerMessage(msg) {
         showScreen("waiting");
       } else {
         myAircraftChoice = null;
-        showAircraftSelect(matchRoster.length > 2
+        showAircraftSelect("onlineSelect", matchRoster.length > 2
           ? "チーム戦の参加者が揃いました！機体を選んでください。"
           : "対戦相手が見つかりました！機体を選んでください。");
       }
@@ -3655,24 +3662,25 @@ document.getElementById("btnRoomLeave").addEventListener("click", () => {
 // --- 14-6. メニュー操作 ---
 document.getElementById("btnVsAI").addEventListener("click", () => {
   mode = "ai";
+  menuChoice = "ai";
   showCategorySelect();
 });
 
 document.getElementById("btnRandomMatch").addEventListener("click", () => {
   mode = "online";
-  pendingOnlineAction = "random";
+  menuChoice = "random";
   showCategorySelect();
 });
 
 document.getElementById("btnRandomTeamMatch").addEventListener("click", () => {
   mode = "online";
-  pendingOnlineAction = "randomTeam";
+  menuChoice = "randomTeam";
   showCategorySelect("4対4のチーム戦です。使う機体のカテゴリを選んでください。");
 });
 
 document.getElementById("btnCreateRoom").addEventListener("click", () => {
   mode = "online";
-  pendingOnlineAction = "create";
+  menuChoice = "create";
   showCategorySelect();
 });
 
@@ -3704,12 +3712,12 @@ document.getElementById("btnWaitCancel").addEventListener("click", () => {
 });
 
 document.getElementById("btnSelectBack").addEventListener("click", () => {
-  if (mode === "ai" && aiStage === "enemy") {
+  if (phase === "aiSelectEnemy") {
     // 敵機選択中の「戻る」は自機選択に戻るだけ（メニューには出ない）
     startAircraftSelectForPlayer();
     return;
   }
-  if (mode === "ai" && aiStage === "player" && !queuedForRandomMatch) {
+  if (phase === "aiSelectPlayer" && !queued) {
     // 自機選択中の「戻る」はカテゴリ選択に戻る（ランダムマッチ待機中はキュー解除のためメニューに戻す）
     showCategorySelect();
     return;
@@ -3921,6 +3929,7 @@ feedbackSendEl.addEventListener("click", () => {
     message,
     time: new Date().toISOString(),
     mode,
+    phase, // バグ報告がどの画面から送られたかを追えるようにする
     playerAircraft: player && player.params ? player.params.label : null,
     enemyAircraft: enemy && enemy.params ? enemy.params.label : null,
   };
