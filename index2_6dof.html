@@ -2225,7 +2225,7 @@ function resetGame(playerType, enemyType, side) {
       team: foeTeam,
       control: mode === "online" ? "remote" : "ai",
       netId: mode === "online" ? "opponent" : null,
-      name: mode === "online" ? opponentName : null,
+      name: mode === "online" ? net.opponentName : null,
     },
   ]);
 }
@@ -2503,9 +2503,9 @@ function animate() {
     }
 
     if (mode === "online") {
-      stateSendAccum += dt;
-      if (stateSendAccum >= STATE_SEND_INTERVAL) {
-        stateSendAccum = 0;
+      net.stateSendAccum += dt;
+      if (net.stateSendAccum >= STATE_SEND_INTERVAL) {
+        net.stateSendAccum = 0;
         sendPlayerState();
       }
     }
@@ -2765,11 +2765,8 @@ let matchCategory = null;   // "jet" | "prop"（この対戦全体で使う機�
 // "ai" | "random" | "randomTeam" | "create"（「ルームに参加」はカテゴリ選択を挟まないので該当なし）
 let menuChoice = null;
 
-// ランダムマッチのキューに並んでいるか。これは phase とは別の話で、
-// 「自機を選んでいる最中」でも「AIと練習中」でも、裏で並び続けている＝両方と同時に成り立つ。
-// だから phase に混ぜず、独立した目印として持つ。
-let queued = false;
-let waitingAircraftChoice = null; // 待機中の練習で使っている機体（マッチ成立時にそのまま本番へ送る）
+// ランダムマッチの列に並んでいるか（net.queued）と、待機中の練習機体（net.waitingAircraft）は
+// 対戦を抜けたら消える情報なので、14-4 の net にまとめてある。
 
 function randomAircraftFromCategory(category) {
   const keys = Object.keys(AIRCRAFT_DB).filter((k) => AIRCRAFT_DB[k].category === category);
@@ -2794,9 +2791,9 @@ function onCategoryChosen(category) {
     // 対戦の中身はAI戦なので mode は "ai"。キューに並んでいることは queued が覚える。
     // これはチーム戦のキュー（8人揃うまで待つ）でも同じ。
     const teamSize = menuChoice === "randomTeam" ? 4 : 1;
-    queued = true;
+    net.queued = true;
     connectWS({ type: "queue_random", category, size: teamSize, name: loadPlayerName() || "名無しさん" }).catch((e) => {
-      queued = false;
+      net.queued = false;
       returnToMenu("接続に失敗しました: " + e.message);
     });
     mode = "ai";
@@ -2847,9 +2844,9 @@ function onAircraftCardClick(key) {
   markSelectedCard(key);
   if (phase === "aiSelectPlayer") {
     aiPlayerChoice = key;
-    if (queued) {
+    if (net.queued) {
       // マッチが見つかるまでの練習。敵機は選ばせずランダムで即開戦する
-      waitingAircraftChoice = key;
+      net.waitingAircraft = key;
       resetGame(aiPlayerChoice, randomAircraftFromCategory(matchCategory));
       startPlaying("aiPlay");
       return;
@@ -2859,7 +2856,7 @@ function onAircraftCardClick(key) {
     resetGame(aiPlayerChoice, key);
     startPlaying("aiPlay");
   } else if (phase === "onlineSelect") {
-    myAircraftChoice = key;
+    net.myAircraft = key;
     sendNet({ type: "select_aircraft", aircraft: key, name: loadPlayerName() || "名無しさん" });
     selectStatusEl.textContent = "ほかの参加者を待っています…";
     renderRosterProgress();
@@ -2879,14 +2876,14 @@ function startPlaying(nextPhase) {
 function startOnlineMatch() {
   // サーバーから配られた roster をそのまま出撃順にする（全員が同じ配列を受け取るので、
   // どの端末でも同じ初期配置になる）。自分の機体だけ control="local" にする。
-  resetMatch(matchRoster.map((p) => ({
+  resetMatch(net.roster.map((p) => ({
     type: p.aircraft || "F16",
     team: p.team === "B" ? "B" : "A",
-    control: p.id === myNetId ? "local" : "remote",
+    control: p.id === net.myNetId ? "local" : "remote",
     netId: p.id,
-    name: p.id === myNetId ? null : (p.name || null),
+    name: p.id === net.myNetId ? null : (p.name || null),
   })));
-  stateSendAccum = 0;
+  net.stateSendAccum = 0;
   startPlaying("onlinePlay");
   resetChat();
   chatBoxEl.classList.add("active");
@@ -2954,12 +2951,26 @@ document.getElementById("btnToMenu").addEventListener("click", () => {
 // --- 14-4. WebSocket通信 ---
 // サーバーは「部屋」単位で人を束ねるだけで、飛行物理も命中判定も知らない。
 // 1対1も4対4も同じ「部屋」で表現し、人数とチーム分けだけが違う。
-let ws = null;
-let myNetId = null;                  // この端末の機体を指すID（サーバーが発行）
-let matchRoster = [];                // 対戦に出る全員 [{id,name,team,aircraft}]
-let myAircraftChoice = null;
-let opponentName = null;             // 1対1のときの相手名（既存の表示に使う）
-let stateSendAccum = 0;
+// この「1回の対戦」に属する情報は、バラバラの変数ではなく net にまとめて持つ。
+// 理由は消し忘れを防ぐため：対戦を抜けるときは net をこの初期値で作り直すだけでよく、
+// 変数を1つずつ手で戻す必要がない（＝新しい項目を足しても、戻し忘れが起こらない）。
+// 対戦をまたいで生き残るもの（グローバルチャットの接続など）はここに入れないこと。
+function freshNet() {
+  return {
+    ws: null,                 // 対戦用の接続。対戦を抜けるたびに閉じて捨てる
+    myNetId: null,            // この端末の機体を指すID（サーバーが発行）
+    roster: [],               // 対戦に出る全員 [{id,name,team,aircraft}]
+    myAircraft: null,         // 自分が選んだ機体
+    opponentName: null,       // 1対1のときの相手名（既存の表示に使う）
+    stateSendAccum: 0,        // 状態送信の間隔を測るためのタイマー
+    queued: false,            // ランダムマッチの列に並んでいるか（phaseとは独立。14-0参照）
+    waitingAircraft: null,    // 待機中の練習で使っている機体（マッチ成立時にそのまま本番へ送る）
+    pendingInviteName: null,  // 部屋が出来たら招待を送る相手
+    inviteSentNotice: "",     // ルーム画面に出す「招待を送りました」の一文
+  };
+}
+let net = freshNet();
+
 const STATE_SEND_INTERVAL = 1 / 20;  // 状態送信は20Hzで十分（毎フレーム送ると帯域を無駄にする）
 
 const serverUrlInputEl = document.getElementById("serverUrlInput");
@@ -2999,7 +3010,7 @@ function connectWS(initialMessage) {
     }
     sock.onopen = () => {
       opened = true;
-      ws = sock;
+      net.ws = sock;
       if (initialMessage) sendNet(initialMessage);
       resolve(sock);
     };
@@ -3007,8 +3018,8 @@ function connectWS(initialMessage) {
       if (!opened) reject(new Error("サーバーに接続できませんでした"));
     };
     sock.onclose = () => {
-      if (ws === sock) {
-        ws = null;
+      if (net.ws === sock) {
+        net.ws = null;
         handleServerDisconnect();
       }
     };
@@ -3021,7 +3032,7 @@ function connectWS(initialMessage) {
 }
 
 function sendNet(msg) {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  if (net.ws && net.ws.readyState === WebSocket.OPEN) net.ws.send(JSON.stringify(msg));
 }
 
 // --- チャット（オンライン対戦中のみ） ---
@@ -3074,10 +3085,15 @@ const LOBBY_CHAT_INTERVAL_MS = 1500; // サーバー側の連投制限と同じ�
                                      // ここでも止めないと、サーバーに弾かれた発言が
                                      // 自分の画面にだけ残って「送れたつもり」になってしまう。
 
-let lastLobbyChatAt = 0;
-let lobbyWs = null;
-let lobbyReconnectDelay = LOBBY_RECONNECT_MIN_MS;
-let lobbyReconnectTimer = null;
+// グローバルチャット側の状態。net と違って対戦をまたいで生き残る（＝リセットしない）ので、
+// 別のまとまりにしてある。どちらに入れるかの基準は「対戦を抜けたら捨てるかどうか」。
+const lobby = {
+  ws: null,
+  reconnectDelay: LOBBY_RECONNECT_MIN_MS,
+  reconnectTimer: null,
+  lastChatAt: 0,
+  onlineNames: [],  // 今ロビーにいる人の名前（フレンドのオンライン表示に使う）
+};
 
 function appendLobbyLine(kind, name, text) {
   const line = document.createElement("div");
@@ -3096,19 +3112,19 @@ function setLobbyConnected(connected, statusText) {
 }
 
 function scheduleLobbyReconnect() {
-  if (lobbyReconnectTimer) return;
-  lobbyReconnectTimer = setTimeout(() => {
-    lobbyReconnectTimer = null;
+  if (lobby.reconnectTimer) return;
+  lobby.reconnectTimer = setTimeout(() => {
+    lobby.reconnectTimer = null;
     connectLobby();
-  }, lobbyReconnectDelay);
-  lobbyReconnectDelay = Math.min(lobbyReconnectDelay * 2, LOBBY_RECONNECT_MAX_MS);
+  }, lobby.reconnectDelay);
+  lobby.reconnectDelay = Math.min(lobby.reconnectDelay * 2, LOBBY_RECONNECT_MAX_MS);
 }
 
 function connectLobby() {
-  if (lobbyReconnectTimer) { clearTimeout(lobbyReconnectTimer); lobbyReconnectTimer = null; }
-  if (lobbyWs) {
-    const old = lobbyWs;
-    lobbyWs = null;
+  if (lobby.reconnectTimer) { clearTimeout(lobby.reconnectTimer); lobby.reconnectTimer = null; }
+  if (lobby.ws) {
+    const old = lobby.ws;
+    lobby.ws = null;
     old.onclose = null; // 自分で張り直す時は再接続タイマーを起こさない
     old.close();
   }
@@ -3120,17 +3136,17 @@ function connectLobby() {
     scheduleLobbyReconnect();
     return;
   }
-  lobbyWs = sock;
+  lobby.ws = sock;
   setLobbyConnected(false, "接続中…");
 
   sock.onopen = () => {
-    lobbyReconnectDelay = LOBBY_RECONNECT_MIN_MS;
+    lobby.reconnectDelay = LOBBY_RECONNECT_MIN_MS;
     sock.send(JSON.stringify({ type: "lobby_join", name: loadPlayerName() || "名無しさん" }));
   };
   sock.onerror = () => {}; // 失敗の後始末は onclose 側にまとめる
   sock.onclose = () => {
-    if (lobbyWs !== sock) return; // 既に別の接続へ張り替え済み
-    lobbyWs = null;
+    if (lobby.ws !== sock) return; // 既に別の接続へ張り替え済み
+    lobby.ws = null;
     setLobbyConnected(false, "接続できません（再接続します）");
     scheduleLobbyReconnect();
   };
@@ -3142,11 +3158,11 @@ function connectLobby() {
         lobbyChatLogEl.innerHTML = "";
         (msg.messages || []).forEach((m) => appendLobbyLine("lobbyOther", m.name, m.text));
         setLobbyConnected(true, `接続中: ${msg.count}人`);
-        onlineNames = msg.names || [];
+        lobby.onlineNames = msg.names || [];
         renderFriendList();
         break;
       case "lobby_names":
-        onlineNames = msg.names || [];
+        lobby.onlineNames = msg.names || [];
         renderFriendList();
         break;
       case "friend_invited":
@@ -3172,21 +3188,21 @@ lobbyChatInputEl.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
   const text = lobbyChatInputEl.value.trim();
   if (!text) { lobbyChatInputEl.value = ""; return; }
-  if (!lobbyWs || lobbyWs.readyState !== WebSocket.OPEN) {
+  if (!lobby.ws || lobby.ws.readyState !== WebSocket.OPEN) {
     lobbyChatInputEl.value = "";
     appendLobbyLine("lobbySystem", null, "（サーバーに繋がっていないため送信できませんでした）");
     return;
   }
   const now = Date.now();
-  if (now - lastLobbyChatAt < LOBBY_CHAT_INTERVAL_MS) {
+  if (now - lobby.lastChatAt < LOBBY_CHAT_INTERVAL_MS) {
     // 入力内容は消さずに残す（打ち直しの手間を省くため）
     appendLobbyLine("lobbySystem", null, "（連続で送りすぎです。少し待ってから送信してください）");
     return;
   }
-  lastLobbyChatAt = now;
+  lobby.lastChatAt = now;
   lobbyChatInputEl.value = "";
   const myName = loadPlayerName() || "名無しさん";
-  lobbyWs.send(JSON.stringify({ type: "lobby_chat", name: myName, text }));
+  lobby.ws.send(JSON.stringify({ type: "lobby_chat", name: myName, text }));
   appendLobbyLine("lobbySelf", myName, text);
 });
 
@@ -3198,9 +3214,8 @@ lobbyChatInputEl.addEventListener("keydown", (e) => {
 const FRIENDS_KEY = "dogfightFriends";
 const friendListEl = document.getElementById("friendList");
 const friendNameInputEl = document.getElementById("friendNameInput");
-let onlineNames = [];
-let pendingInviteName = null; // 部屋が出来たら招待を送る相手（フレンド一覧の「招待」から設定）
-let inviteSentNotice = "";    // ルーム画面に出す「招待を送りました」の一文
+// 誰がオンラインかは lobby.onlineNames、招待まわりは net.net.pendingInviteName /
+// net.net.inviteSentNotice にまとめてある（それぞれの宣言はそちらのコメントを参照）。
 
 function loadFriends() {
   try { return JSON.parse(localStorage.getItem(FRIENDS_KEY)) || []; } catch { return []; }
@@ -3220,7 +3235,7 @@ function renderFriendList() {
     return;
   }
   friends.forEach((name) => {
-    const online = onlineNames.includes(name);
+    const online = lobby.onlineNames.includes(name);
     const row = document.createElement("div");
     row.className = "friendRow " + (online ? "online" : "offline");
 
@@ -3275,21 +3290,21 @@ function inviteFriend(name) {
   waitingTextEl.textContent = "ルームを作成しています…";
   showScreen("waiting");
   connectWS({ type: "create_room", category: matchCategory, name: loadPlayerName() || "名無しさん" })
-    .then(() => { pendingInviteName = name; })
+    .then(() => { net.pendingInviteName = name; })
     .catch((e) => returnToMenu("接続に失敗しました: " + e.message));
 }
 
 // ルームが出来た時点で招待を送る（room_created を受けてから呼ばれる）
 function sendPendingInvite(code) {
-  if (!pendingInviteName) return;
+  if (!net.pendingInviteName) return;
   // 招待の結果は renderRoom が毎回書き直す欄に出るので、変数に覚えさせて合成する
-  if (lobbyWs && lobbyWs.readyState === WebSocket.OPEN) {
-    lobbyWs.send(JSON.stringify({ type: "friend_invite", to: pendingInviteName, code }));
-    inviteSentNotice = `${pendingInviteName} さんを招待しました。参加を待っています…`;
+  if (lobby.ws && lobby.ws.readyState === WebSocket.OPEN) {
+    lobby.ws.send(JSON.stringify({ type: "friend_invite", to: net.pendingInviteName, code }));
+    net.inviteSentNotice = `${net.pendingInviteName} さんを招待しました。参加を待っています…`;
   } else {
-    inviteSentNotice = "サーバーに繋がっていないため招待を送れませんでした。コードを直接伝えてください。";
+    net.inviteSentNotice = "サーバーに繋がっていないため招待を送れませんでした。コードを直接伝えてください。";
   }
-  pendingInviteName = null;
+  net.pendingInviteName = null;
 }
 
 // 招待を受け取ったとき
@@ -3322,28 +3337,24 @@ document.getElementById("inviteDecline").addEventListener("click", () => {
 
 // サーバーアドレスを書き換えたら、そちらのロビーへ繋ぎ直す
 serverUrlInputEl.addEventListener("change", () => {
-  lobbyReconnectDelay = LOBBY_RECONNECT_MIN_MS;
+  lobby.reconnectDelay = LOBBY_RECONNECT_MIN_MS;
   connectLobby();
 });
 
 connectLobby();
 
+// 対戦から抜ける。以前はここで戻すべき変数を1つずつ手で書いていたため、
+// 「戻していない変数があるのは意図なのか消し忘れなのか」が読んでも分からなかった。
+// 今は net をまるごと初期値で作り直すので、項目が増えても戻し忘れが起こらない。
 function leaveOnlineMatch() {
-  if (ws) {
+  if (net.ws) {
     sendNet({ type: "leave_match" });
     sendNet({ type: "cancel" });
-    ws.close();
-    ws = null;
+    net.ws.close();
   }
   chatBoxEl.classList.remove("active");
   showSpectateNotice(false);
-  queued = false;
-  waitingAircraftChoice = null;
-  myNetId = null;
-  matchRoster = [];
-  opponentName = null;
-  pendingInviteName = null;
-  inviteSentNotice = "";
+  net = freshNet(); // ← これ1行で対戦中の情報が全部まっさらになる
 }
 
 function handleServerDisconnect() {
@@ -3369,37 +3380,37 @@ function handleServerMessage(msg) {
     case "room_error":
       showScreen("joinRoom");
       joinRoomNoteEl.textContent = msg.message || "参加に失敗しました。";
-      if (ws) { ws.close(); ws = null; }
+      if (net.ws) { net.ws.close(); net.ws = null; }
       break;
     case "room_update":
       // 部屋の顔ぶれが変わるたびに届く（開戦後はもう届かない）。
       // 参加した直後の「接続中…」画面から、この時点でルーム画面へ移す。
-      myNetId = msg.you;
+      net.myNetId = msg.you;
       renderRoom(msg);
       showScreen("room");
       break;
     case "match_ready": {
       // 部屋のメンバーが確定し、これから機体選択に入る
-      myNetId = msg.you;
-      matchRoster = msg.players || [];
+      net.myNetId = msg.you;
+      net.roster = msg.players || [];
       matchCategory = msg.category === "prop" ? "prop" : "jet";
-      opponentName = nameOfSoleOpponent();
+      net.opponentName = nameOfSoleOpponent();
       // ここまでの練習は手元計算のAI戦だった（mode==="ai"）。マッチが成立したので、
       // この時点で対戦の中身が通信対戦に変わる。キューからも外れる。
-      const hadWaitingChoice = queued && waitingAircraftChoice;
-      queued = false;
+      const hadWaitingChoice = net.queued && net.waitingAircraft;
+      net.queued = false;
       mode = "online";
       running = false;
       if (hadWaitingChoice) {
         // 待機中のAI練習を即座に打ち切り、練習に使っていた機体でそのまま本番へ
-        myAircraftChoice = waitingAircraftChoice;
-        sendNet({ type: "select_aircraft", aircraft: myAircraftChoice, name: loadPlayerName() || "名無しさん" });
+        net.myAircraft = net.waitingAircraft;
+        sendNet({ type: "select_aircraft", aircraft: net.myAircraft, name: loadPlayerName() || "名無しさん" });
         waitingTextEl.textContent =
-          `対戦相手が見つかりました！自分の機体（${AIRCRAFT_DB[myAircraftChoice].label}）を送信しました。ほかの参加者を待っています…`;
+          `対戦相手が見つかりました！自分の機体（${AIRCRAFT_DB[net.myAircraft].label}）を送信しました。ほかの参加者を待っています…`;
         showScreen("waiting");
       } else {
-        myAircraftChoice = null;
-        showAircraftSelect("onlineSelect", matchRoster.length > 2
+        net.myAircraft = null;
+        showAircraftSelect("onlineSelect", net.roster.length > 2
           ? "チーム戦の参加者が揃いました！機体を選んでください。"
           : "対戦相手が見つかりました！機体を選んでください。");
       }
@@ -3407,13 +3418,13 @@ function handleServerMessage(msg) {
     }
     case "roster_update":
       // 誰がどの機体を選んだかの途中経過
-      matchRoster = msg.players || [];
-      opponentName = nameOfSoleOpponent();
+      net.roster = msg.players || [];
+      net.opponentName = nameOfSoleOpponent();
       if (mode === "online") renderRosterProgress();
       break;
     case "start":
-      matchRoster = msg.players || matchRoster;
-      opponentName = nameOfSoleOpponent();
+      net.roster = msg.players || net.roster;
+      net.opponentName = nameOfSoleOpponent();
       startOnlineMatch();
       break;
     case "state":
@@ -3445,14 +3456,14 @@ function handleServerMessage(msg) {
       }
       break;
     case "rematch_ready":
-      myAircraftChoice = null;
-      matchRoster = msg.players || matchRoster;
+      net.myAircraft = null;
+      net.roster = msg.players || net.roster;
       combatants.forEach((c) => { c.remote = null; });
       showAircraftSelect("同じメンバーでもう一度！機体を選んでください。");
       break;
     case "room_closed":
       if (mode === "online") {
-        if (ws) { ws.close(); ws = null; }
+        if (net.ws) { net.ws.close(); net.ws = null; }
         if (running && !gameOver) {
           endGame(null, msg.message || "対戦が終了しました。");
         } else if (screens.gameOver.classList.contains("active")) {
@@ -3469,7 +3480,7 @@ function handleServerMessage(msg) {
 
 // 自分のチーム（roster から引く。まだ roster が無い間は "A" 扱い）
 function myTeam() {
-  const me = matchRoster.find((p) => p.id === myNetId);
+  const me = net.roster.find((p) => p.id === net.myNetId);
   return me && me.team === "B" ? "B" : "A";
 }
 
@@ -3479,14 +3490,14 @@ function combatantByNetId(id) {
 
 // 1対1のときだけ「対戦相手の名前」を既存の表示（ENEMYパネル等）に流用する
 function nameOfSoleOpponent() {
-  const foes = matchRoster.filter((p) => p.id !== myNetId);
+  const foes = net.roster.filter((p) => p.id !== net.myNetId);
   return foes.length === 1 ? (foes[0].name || null) : null;
 }
 
 // 機体選択画面で、誰が選び終わったかを出す
 function renderRosterProgress() {
-  const foes = matchRoster.filter((p) => p.id !== myNetId);
-  if (matchRoster.length <= 2) {
+  const foes = net.roster.filter((p) => p.id !== net.myNetId);
+  if (net.roster.length <= 2) {
     const foe = foes[0];
     if (foe && foe.aircraft) {
       selectNoteEl.textContent = `対戦相手: ${foe.name ? foe.name + " / " : ""}${AIRCRAFT_DB[foe.aircraft].label}`;
@@ -3495,10 +3506,10 @@ function renderRosterProgress() {
     const mine = myTeam();
     const line = (p) =>
       `${p.team === mine ? "味方" : "敵"} ${p.name || "名無しさん"}: ${p.aircraft ? AIRCRAFT_DB[p.aircraft].label : "選択中…"}`;
-    selectNoteEl.textContent = matchRoster.filter((p) => p.id !== myNetId).map(line).join("\n");
+    selectNoteEl.textContent = net.roster.filter((p) => p.id !== net.myNetId).map(line).join("\n");
   }
-  const remaining = matchRoster.filter((p) => !p.aircraft).length;
-  if (myAircraftChoice) {
+  const remaining = net.roster.filter((p) => !p.aircraft).length;
+  if (net.myAircraft) {
     selectStatusEl.textContent = remaining > 0
       ? `ほかの参加者を待っています…（残り${remaining}人）`
       : "まもなく開始します…";
@@ -3629,11 +3640,11 @@ function renderRoom(info) {
   const bothTeamsFilled = ["A", "B"].every((t) => (info.players || []).some((p) => p.team === t));
   btnRoomStartEl.style.display = isHost ? "" : "none";
   btnRoomStartEl.disabled = !bothTeamsFilled;
-  if ((info.players || []).length > 1) inviteSentNotice = ""; // 誰か来たら招待中の案内は消す
+  if ((info.players || []).length > 1) net.inviteSentNotice = ""; // 誰か来たら招待中の案内は消す
   const baseNote = !bothTeamsFilled
     ? "両チームに1人以上必要です。"
     : (isHost ? "全員揃ったら「対戦開始」を押してください。" : "ホストが開始するのを待っています…");
-  roomStatusNoteEl.textContent = (inviteSentNotice ? inviteSentNotice + "\n" : "") + baseNote;
+  roomStatusNoteEl.textContent = (net.inviteSentNotice ? net.inviteSentNotice + "\n" : "") + baseNote;
 }
 
 const roomCodeCopyBtnEl = document.getElementById("roomCodeCopyBtn");
@@ -3717,7 +3728,7 @@ document.getElementById("btnSelectBack").addEventListener("click", () => {
     startAircraftSelectForPlayer();
     return;
   }
-  if (phase === "aiSelectPlayer" && !queued) {
+  if (phase === "aiSelectPlayer" && !net.queued) {
     // 自機選択中の「戻る」はカテゴリ選択に戻る（ランダムマッチ待機中はキュー解除のためメニューに戻す）
     showCategorySelect();
     return;
@@ -3780,8 +3791,8 @@ playerNameInputEl.value = loadPlayerName();
 playerNameInputEl.addEventListener("change", () => {
   savePlayerName(playerNameInputEl.value);
   fetchAndShowRank();
-  if (lobbyWs && lobbyWs.readyState === WebSocket.OPEN) {
-    lobbyWs.send(JSON.stringify({ type: "lobby_rename", name: loadPlayerName() || "名無しさん" }));
+  if (lobby.ws && lobby.ws.readyState === WebSocket.OPEN) {
+    lobby.ws.send(JSON.stringify({ type: "lobby_rename", name: loadPlayerName() || "名無しさん" }));
   }
 });
 
