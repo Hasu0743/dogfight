@@ -440,7 +440,7 @@
   <button id="feedbackBtn" title="バグ報告・感想を送る">📝 フィードバック</button>
   <div id="feedbackPanel">
     <h2>フィードバック / バグ報告</h2>
-    <textarea id="feedbackText" placeholder="気づいたこと、バグ、感想などを書いてください。誉め言葉ぐらいあってもいいんですよ？"></textarea>
+    <textarea id="feedbackText" placeholder="気づいたこと、バグ、感想、追加してほしいゲームモードなどの要望意見をください。"></textarea>
     <div class="menuButtons">
       <button class="menuBtn" id="feedbackSend">送信</button>
       <button class="menuBtn secondary" id="feedbackClose">閉じる</button>
@@ -581,9 +581,10 @@
   <div id="center-message">
     <div class="screen active" id="screenMenu">
       <h1>航空格闘戦</h1>
-      <p>3rd/4th世代 戦闘機による近接格闘戦シミュレーター<br>相手の射線（ガンコーン）に入り続けると撃墜されます。</p>
+      <p>3rd/4th世代戦闘機による近接格闘戦シミュレーター<br>相手の射線に入ると撃墜されます。</p>
       <div class="menuButtons">
         <button class="menuBtn" id="btnVsAI">AIと対戦（1人プレイ）</button>
+        <button class="menuBtn" id="btnVsPlayer">オンライン対戦</button>
         <button class="menuBtn" id="btnRandomMatch">オンライン: ランダムマッチ（1対1）</button>
         <button class="menuBtn" id="btnRandomTeamMatch">オンライン: ランダムマッチ（4対4）</button>
         <button class="menuBtn" id="btnCreateRoom">オンライン: ルームを作成（フレンド戦）</button>
@@ -651,7 +652,7 @@
     </div>
 
     <div class="screen" id="screenGameOver">
-      <h1 id="msgTitle">航空格闘戦</h1>
+      <h1 id="msgTitle">航空格闘戦シム</h1>
       <p id="msgBody"></p>
       <div class="menuButtons">
         <button class="menuBtn" id="btnPrimary">もう一度</button>
@@ -2611,6 +2612,40 @@ setInterval(animate, 1000 / 60);
 // 飛行物理・命中判定は今まで通りローカルで計算し（6〜8, 12章）、オンライン時は
 // 敵機の表示だけをネットワークから受け取った状態に差し替える（applyRemoteState）。
 
+// --- 14-0. 今いる場所（phase） ---
+// 「プレイヤーが今どこにいるか」を、この phase 1つだけで表す。
+// 以前は mode / aiStage / queuedForRandomMatch などに分散していて、
+// 「今どこか」を知るのに複数の変数を突き合わせる必要があった。
+//
+// ■ 新しい画面を足すときの手順（3つだけ）
+//   1. この PHASES に「名前: 説明」を1行足す
+//   2. HTMLに <div class="screen" id="screenXxx"> を書く
+//   3. 下の screens と SCREEN_PHASE にそれぞれ1行足す
+// これで showScreen("xxx") が使えるようになり、phase も自動で追従する。
+const PHASES = {
+  menu:         "トップメニュー",
+  category:     "カテゴリ選択",
+  joinRoom:     "ルームコードの入力",
+  connecting:   "サーバー接続中・マッチング待ち",
+  roomLobby:    "ルーム（フレンド戦の待合室）",
+  aiSelect:     "1人プレイの機体選択",
+  onlineSelect: "オンライン対戦の機体選択",
+  aiPlay:       "AI戦をプレイ中",
+  onlinePlay:   "オンライン対戦をプレイ中",
+  gameOver:     "決着画面",
+};
+
+let phase = "menu"; // 初期表示はトップメニュー
+
+function setPhase(next) {
+  if (!PHASES[next]) {
+    // PHASES に無い名前を渡した＝1行足し忘れ。落とさずに警告だけ出す。
+    console.warn("未登録のphaseが指定されました:", next);
+    return;
+  }
+  phase = next;
+}
+
 // --- 14-1. 画面切り替え ---
 const screens = {
   menu: document.getElementById("screenMenu"),
@@ -2623,7 +2658,22 @@ const screens = {
 // ルーム画面だけは #center-message の細い箱を共有せず、専用の広いレイアウト
 // （#roomScreen）を別途持っている。表示切り替えはここで一本化する。
 const roomScreenEl = document.getElementById("roomScreen");
+
+// 画面名 → phase の対応。画面の切り替えは必ずここを通るので、
+// この表を書いておけば phase の更新を各所に散らさずに済む。
+// "select"（機体選択）だけは1人プレイとオンラインで意味が変わるため、
+// ここには載せず showAircraftSelect() 側で設定する。
+const SCREEN_PHASE = {
+  menu:     "menu",
+  category: "category",
+  joinRoom: "joinRoom",
+  waiting:  "connecting",
+  room:     "roomLobby",
+  gameOver: "gameOver",
+};
+
 function showScreen(name) {
+  if (SCREEN_PHASE[name]) setPhase(SCREEN_PHASE[name]);
   if (name === "room") {
     Object.values(screens).forEach((el) => el.classList.remove("active"));
     centerMsg.style.display = "none";
@@ -2779,6 +2829,8 @@ function showAircraftSelect(note) {
   selectStatusEl.textContent = "";
   markSelectedCard(null);
   showScreen("select");
+  // 同じ「機体選択」画面でも、1人プレイとオンラインでは意味が違うので分けて記録する
+  setPhase(mode === "online" ? "onlineSelect" : "aiSelect");
 }
 
 function onAircraftCardClick(key) {
@@ -2792,6 +2844,7 @@ function onAircraftCardClick(key) {
         running = true;
         lastTime = performance.now();
         hideCenterMessage();
+        setPhase("aiPlay"); // マッチが見つかるまでのAI練習
         return;
       }
       aiStage = "enemy";
@@ -2801,6 +2854,7 @@ function onAircraftCardClick(key) {
       running = true;
       lastTime = performance.now();
       hideCenterMessage();
+      setPhase("aiPlay");
       aiStage = "player";
     }
   } else if (mode === "online") {
@@ -2826,6 +2880,7 @@ function startOnlineMatch() {
   running = true;
   lastTime = performance.now();
   hideCenterMessage();
+  setPhase("onlinePlay");
   resetChat();
   chatBoxEl.classList.add("active");
 }
