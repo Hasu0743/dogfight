@@ -585,11 +585,8 @@
       <div class="menuButtons">
         <button class="menuBtn" id="btnVsAI">AIと対戦（1人プレイ）</button>
         <button class="menuBtn" id="btnVsPlayer">オンライン対戦</button>
-        <button class="menuBtn" id="btnRandomMatch">オンライン: ランダムマッチ（1対1）</button>
-        <button class="menuBtn" id="btnRandomTeamMatch">オンライン: ランダムマッチ（4対4）</button>
-        <button class="menuBtn" id="btnCreateRoom">オンライン: ルームを作成（フレンド戦）</button>
-        <button class="menuBtn secondary" id="btnJoinRoomShow">オンライン: ルームに参加</button>
-      </div>
+    </div>
+
       <div class="serverRow">
         <label for="serverUrlInput">中継サーバーアドレス（オンライン対戦用）</label>
         <input type="text" id="serverUrlInput" placeholder="ws://localhost:8080">
@@ -659,6 +656,20 @@
         <button class="menuBtn secondary" id="btnToMenu">メニューに戻る</button>
       </div>
     </div>
+
+    <div class="screen" id="screenOnlineHub">
+      <h1>オンライン対戦</h1>
+      <p>対戦形式を選んでください。</p>
+      <div class="menuButtons">
+      <button class="menuBtn" id="btnRandom1v1">ランダムマッチ(1v1)</button>      
+      <button class="menuBtn" id="btnRandom2v2">ランダムマッチ(2v2)</button>
+      <button class="menuBtn" id="btnRoomCreate">ルームを作る(フレンド戦)</button>
+      <button class="menuBtn secondary" id="btnRoomJoin">ルームに参加</button>
+      <button class="menuBtn secondary" id="btnOnlineBack">戻る</button>
+    </div>
+    <p class="menuNote" id="onlineHubNote"></p>
+    </div>
+
 
     <p id="tipDisplay" class="tipDisplay"></p>
   </div>
@@ -2634,6 +2645,7 @@ setInterval(animate, 1000 / 60);
 // これで showScreen("xxx") が使えるようになり、phase も自動で追従する。
 const PHASES = {
   menu:           "トップメニュー",
+  onlineHub :     "オンライン対戦メニュー",
   category:       "カテゴリ選択",
   joinRoom:       "ルームコードの入力",
   connecting:     "サーバー接続中・マッチング待ち",
@@ -2660,6 +2672,7 @@ function setPhase(next) {
 // --- 14-1. 画面切り替え ---
 const screens = {
   menu: document.getElementById("screenMenu"),
+  onlineHub:document.getElementById("screenOnlineHub"),
   category: document.getElementById("screenCategorySelect"),
   joinRoom: document.getElementById("screenJoinRoom"),
   waiting: document.getElementById("screenWaiting"),
@@ -2676,6 +2689,7 @@ const roomScreenEl = document.getElementById("roomScreen");
 // ここには載せず showAircraftSelect() 側で設定する。
 const SCREEN_PHASE = {
   menu:     "menu",
+  onlineHub:"onlineHub",
   category: "category",
   joinRoom: "joinRoom",
   waiting:  "connecting",
@@ -2769,6 +2783,7 @@ let matchCategory = null;   // "jet" | "prop"（この対戦全体で使う機�
 // メニューで押されたボタン。カテゴリ選択のあと何をするかを決めるためだけに使う。
 // "ai" | "random" | "randomTeam" | "create"（「ルームに参加」はカテゴリ選択を挟まないので該当なし）
 let menuChoice = null;
+let randomTeamSize = 1; // ランダムマッチのときのチーム人数（1人対戦なら1、2人対戦なら2、4人対戦なら4）。
 
 // ランダムマッチの列に並んでいるか（net.queued）と、待機中の練習機体（net.waitingAircraft）は
 // 対戦を抜けたら消える情報なので、15-1 の net にまとめてある。
@@ -2790,12 +2805,12 @@ function onCategoryChosen(category) {
   matchCategory = category;
   if (menuChoice === "ai") {
     startAircraftSelectForPlayer();
-  } else if (menuChoice === "random" || menuChoice === "randomTeam") {
+  } else if (menuChoice === "random" ) {
     // 相手が見つかるまでの間もAIと練習できるように、先にキュー接続だけ済ませておき、
     // 画面は1人プレイと同じ「自機を選ぶ」流れに乗せる（敵機はランダムで即開戦）。
     // 対戦の中身はAI戦なので mode は "ai"。キューに並んでいることは queued が覚える。
     // これはチーム戦のキュー（8人揃うまで待つ）でも同じ。
-    const teamSize = menuChoice === "randomTeam" ? 4 : 1;
+    const teamSize = randomTeamSize;
     net.queued = true;
     connectWS({ type: "queue_random", category, size: teamSize, name: loadPlayerName() || "名無しさん" }).catch((e) => {
       net.queued = false;
@@ -2803,7 +2818,7 @@ function onCategoryChosen(category) {
     });
     mode = "ai";
     showAircraftSelect("aiSelectPlayer", teamSize > 1
-      ? "4対4の参加者を探しています…自分の機体を選ぶと、揃うまでAIと練習できます。"
+      ? `${teamSize}対${teamSize}の参加者を探しています…自分の機体を選ぶと、揃うまでAIと練習できます。`
       : "対戦相手を探しています…自分の機体を選ぶと、見つかるまでAIと練習できます。");
   } else if (menuChoice === "create") {
     waitingTextEl.textContent = "接続しています…";
@@ -2832,13 +2847,22 @@ const SELECT_TITLE = {
   onlineSelect:   "機体を選択",
 };
 
-// 機体選択画面はこの3つの場面で使い回すので、どの場面なのかを必ず渡してもらう
-// （呼ぶ側が指定を強制されるので、phase の設定漏れが起こらない）。
+// 機体選択画面はこの3つの場面で使い回すので、どの場面なのかを必ず渡してもらう。
+// 第1引数を忘れて説明文だけを渡すと、phase が変わらないまま画面だけ出てしまい、
+// 「機体カードを押しても何も起きない」という分かりにくい壊れ方をする。
+// （実際に再戦の処理で1箇所やらかしたので、ここで気づけるようにしてある）
 function showAircraftSelect(nextPhase, note) {
+  if (!SELECT_TITLE[nextPhase]) {
+    console.error(
+      "showAircraftSelect: 第1引数には aiSelectPlayer / aiSelectEnemy / onlineSelect のいずれかが必要です。渡された値:",
+      nextPhase
+    );
+    return;
+  }
   setPhase(nextPhase);
   buildAircraftGrid(matchCategory);
   const catLabel = CATEGORY_LABEL[matchCategory] || "";
-  selectTitleEl.textContent = `${SELECT_TITLE[nextPhase] || "機体を選択"} - ${catLabel}`;
+  selectTitleEl.textContent = `${SELECT_TITLE[nextPhase]} - ${catLabel}`;
   selectNoteEl.textContent = note || "";
   selectStatusEl.textContent = "";
   markSelectedCard(null);
@@ -3048,29 +3072,30 @@ document.getElementById("btnVsAI").addEventListener("click", () => {
   showCategorySelect();
 });
 
-document.getElementById("btnRandomMatch").addEventListener("click", () => {
-  mode = "online";
-  menuChoice = "random";
+document.getElementById("btnVsPlayer").addEventListener("click",() => {
+  showScreen("onlineHub");
+});
+
+document.getElementById("btnOnlineBack").addEventListener("click", () => {
+  showScreen("menu");
+});
+
+document.getElementById("btnRandom1v1").addEventListener("click",()=>{
+  mode = "online"; menuChoice="random"; randomTeamSize = 1;
   showCategorySelect();
 });
 
-document.getElementById("btnRandomTeamMatch").addEventListener("click", () => {
-  mode = "online";
-  menuChoice = "randomTeam";
-  showCategorySelect("4対4のチーム戦です。使う機体のカテゴリを選んでください。");
+document.getElementById("btnRandom2v2").addEventListener("click",()=>{
+  mode="online"; menuChoice="random"; randomTeamSize=2;
+  showCategorySelect("2v2のチーム戦です。使う機体のカテゴリを選んで下さい。");
 });
 
-document.getElementById("btnCreateRoom").addEventListener("click", () => {
-  mode = "online";
-  menuChoice = "create";
-  showCategorySelect();
-});
+document.getElementById("btnRoomCreate").addEventListener("click",()=>{mode="online"; menuChoice="create"; showCategorySelect();});
 
-document.getElementById("btnJoinRoomShow").addEventListener("click", () => {
-  joinRoomNoteEl.textContent = "";
-  roomCodeInputEl.value = "";
-  showScreen("joinRoom");
-});
+document.getElementById("btnRoomJoin").addEventListener("click",()=>{joinRoomNoteEl.textContent="";roomCodeInputEl.value="";showScreen("joinRoom");});
+//上6つ自書き
+
+
 
 document.getElementById("btnJoinRoomBack").addEventListener("click", () => {
   showScreen("menu");
@@ -3656,7 +3681,7 @@ function handleServerMessage(msg) {
       net.myAircraft = null;
       net.roster = msg.players || net.roster;
       combatants.forEach((c) => { c.remote = null; });
-      showAircraftSelect("同じメンバーでもう一度！機体を選んでください。");
+      showAircraftSelect("onlineSelect", "同じメンバーでもう一度！機体を選んでください。");
       break;
     case "room_closed":
       if (mode === "online") {

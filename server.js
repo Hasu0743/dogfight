@@ -207,7 +207,7 @@ function normalizeCategory(c) {
 }
 
 // チームあたりの人数。1 なら従来の1対1、4 なら4対4。
-const TEAM_SIZES = [1, 4];
+const TEAM_SIZES = [1, 2, 4];
 function normalizeTeamSize(n) {
   return TEAM_SIZES.includes(n) ? n : 1;
 }
