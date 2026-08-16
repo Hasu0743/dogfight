@@ -628,11 +628,13 @@ wss.on("connection", (ws) => {
         const text = String(msg.text || "").slice(0, CHAT_MAX_LEN).trim();
         if (!text) break;
         ws.lastLobbyChatAt = now;
-        const entry = { name: normalizeName(msg.name), text };
+        // 時刻はサーバーの時計で記録する（クライアントの時計は信用しない）。
+        // 履歴として後から見る人が「いつの話か」を判断できるようにするためのもの。
+        const entry = { name: normalizeName(msg.name), text, time: now };
         lobbyHistory.push(entry);
         if (lobbyHistory.length > LOBBY_HISTORY_MAX) lobbyHistory = lobbyHistory.slice(-LOBBY_HISTORY_MAX);
         // 送信者の画面には自分の発言を即座に出しているので、ここでは本人以外へ配る
-        broadcastLobby({ type: "lobby_chat", name: entry.name, text: entry.text }, ws);
+        broadcastLobby({ type: "lobby_chat", name: entry.name, text: entry.text, time: entry.time }, ws);
         break;
       }
 

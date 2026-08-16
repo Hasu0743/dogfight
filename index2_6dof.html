@@ -284,6 +284,10 @@
   #lobbyChatLog .lobbySelf { color: #9fd6b0; }
   #lobbyChatLog .lobbyOther { color: #ffd166; }
   #lobbyChatLog .lobbySystem { color: #6a8; }
+  /* 発言時刻。会話の邪魔をしないよう、本文より暗く小さくする */
+  #lobbyChatLog .lobbyTime {
+    color: #6a8; font-size: 10px; margin-right: 6px; opacity: 0.75;
+  }
   #lobbyChatInput {
     width: 100%; box-sizing: border-box; margin-top: 4px; padding: 6px 10px; border-radius: 6px;
     background: rgba(11,22,32,0.8); color: #eafff0; border: 1px solid #567; font-size: 12px;
@@ -3317,16 +3321,49 @@ const lobby = {
   onlineNames: [],  // 今ロビーにいる人の名前（フレンドのオンライン表示に使う）
 };
 
-function appendLobbyLine(kind, name, text) {
+// 「いつの発言か」を短い相対表記にする。絶対時刻を出すと、時差や端末の時計ずれで
+// かえって分かりにくくなるため。24時間を超えたものは日付だけを出す。
+function relativeTimeLabel(time) {
+  const diff = Date.now() - time;
+  if (!time || diff < 0) return "";
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "たった今";
+  if (min < 60) return `${min}分前`;
+  const hour = Math.floor(min / 60);
+  if (hour < 24) return `${hour}時間前`;
+  const d = new Date(time);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+// 表示済みの行の「◯分前」を、時間が経つにつれて書き換える（下の setInterval から呼ぶ）
+function refreshLobbyTimes() {
+  lobbyChatLogEl.querySelectorAll(".lobbyTime").forEach((el) => {
+    el.textContent = relativeTimeLabel(Number(el.dataset.time));
+  });
+}
+
+function appendLobbyLine(kind, name, text, time) {
   const line = document.createElement("div");
   line.className = kind;
-  line.textContent = kind === "lobbySystem" ? text : `${name}: ${text}`;
+  if (time) {
+    // 時刻は別要素にしておく。あとから中身だけ差し替えられるようにするため。
+    const stamp = document.createElement("span");
+    stamp.className = "lobbyTime";
+    stamp.dataset.time = String(time);
+    stamp.textContent = relativeTimeLabel(time);
+    line.appendChild(stamp);
+    line.appendChild(document.createTextNode(`${name}: ${text}`));
+  } else {
+    line.textContent = kind === "lobbySystem" ? text : `${name}: ${text}`;
+  }
   lobbyChatLogEl.appendChild(line);
   while (lobbyChatLogEl.childElementCount > LOBBY_LOG_MAX_LINES) {
     lobbyChatLogEl.removeChild(lobbyChatLogEl.firstChild);
   }
   lobbyChatLogEl.scrollTop = lobbyChatLogEl.scrollHeight;
 }
+
+setInterval(refreshLobbyTimes, 60000);
 
 function setLobbyConnected(connected, statusText) {
   lobbyChatStatusEl.textContent = statusText;
@@ -3378,7 +3415,7 @@ function connectLobby() {
     switch (msg.type) {
       case "lobby_history":
         lobbyChatLogEl.innerHTML = "";
-        (msg.messages || []).forEach((m) => appendLobbyLine("lobbyOther", m.name, m.text));
+        (msg.messages || []).forEach((m) => appendLobbyLine("lobbyOther", m.name, m.text, m.time));
         setLobbyConnected(true, `接続中: ${msg.count}人`);
         lobby.onlineNames = msg.names || [];
         renderFriendList();
@@ -3394,7 +3431,7 @@ function connectLobby() {
         setLobbyConnected(true, `接続中: ${msg.count}人`);
         break;
       case "lobby_chat":
-        appendLobbyLine("lobbyOther", msg.name || "名無しさん", msg.text);
+        appendLobbyLine("lobbyOther", msg.name || "名無しさん", msg.text, msg.time);
         break;
     }
   };
@@ -3425,7 +3462,7 @@ lobbyChatInputEl.addEventListener("keydown", (e) => {
   lobbyChatInputEl.value = "";
   const myName = loadPlayerName() || "名無しさん";
   lobby.ws.send(JSON.stringify({ type: "lobby_chat", name: myName, text }));
-  appendLobbyLine("lobbySelf", myName, text);
+  appendLobbyLine("lobbySelf", myName, text, Date.now());
 });
 
 // --- 15-3. フレンド（オンライン状況の表示とルーム招待） ---
