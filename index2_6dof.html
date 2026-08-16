@@ -414,6 +414,29 @@
   /* ============================================================
      11. お知らせポップアップ
      ============================================================ */
+  /* お知らせ掲示欄（メニュー系の画面に常時出る折りたたみ枠）。
+     ポップアップ(#announcementPanel)とは別物で、こちらは閉じても消えない。 */
+  #announcementBoard { display: none; text-align: left; margin: 0 0 12px; }
+  #announcementBoard.shown { display: block; }
+  #announcementToggle {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 7px 10px; cursor: pointer; text-align: left;
+    background: rgba(255,209,102,0.12); border: 1px solid #6b5a2a; border-radius: 6px;
+    color: #ffd166; font-size: 12px; font-weight: bold; font-family: inherit;
+  }
+  #announcementToggle:hover { background: rgba(255,209,102,0.2); }
+  #announcementHeadline {
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #announcementCaret { flex: none; font-size: 10px; opacity: 0.8; }
+  #announcementBoard.noBody #announcementCaret { display: none; }
+  #announcementBoard.noBody #announcementToggle { cursor: default; }
+  #announcementBody {
+    white-space: pre-line; font-size: 12px; line-height: 1.6; color: #cde;
+    margin: 0; padding: 8px 10px 2px; max-height: 30vh; overflow-y: auto;
+  }
+  #announcementBoard.collapsed #announcementBody { display: none; }
+
   #announcementPanel {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
     pointer-events: auto; display: none; z-index: 1200;
@@ -583,6 +606,17 @@
   </div>
 
   <div id="center-message">
+    <!-- お知らせ掲示欄。個々の画面（.screen）ではなくその手前に置き、メニュー系の画面に
+         いる間だけ表示する（切り替えは showScreen → setAnnouncementVisible）。
+         1行目を見出しとして常に出し、残りは折りたたむ。 -->
+    <div id="announcementBoard">
+      <button type="button" id="announcementToggle">
+        <span id="announcementHeadline"></span>
+        <span id="announcementCaret">▼</span>
+      </button>
+      <p id="announcementBody"></p>
+    </div>
+
     <div class="screen active" id="screenMenu">
       <h1>航空格闘戦</h1>
       <p>3rd/4th世代戦闘機による近接格闘戦シミュレーター<br>相手の射線に入ると撃墜されます。</p>
@@ -2701,8 +2735,13 @@ const SCREEN_PHASE = {
   gameOver: "gameOver",
 };
 
+// お知らせ掲示欄を出す画面。対戦の手前で立ち止まる画面だけに絞る
+// （機体選択や決着画面にまで出すと、操作の邪魔になるため）。
+const ANNOUNCEMENT_SCREENS = ["menu", "onlineHub"];
+
 function showScreen(name) {
   if (SCREEN_PHASE[name]) setPhase(SCREEN_PHASE[name]);
+  setAnnouncementVisible(ANNOUNCEMENT_SCREENS.includes(name));
   if (name === "room") {
     Object.values(screens).forEach((el) => el.classList.remove("active"));
     centerMsg.style.display = "none";
@@ -2737,6 +2776,52 @@ function initSideAds() {
 }
 initSideAds();
 setSideAdsVisible(true); // 初期画面はトップメニューなので最初から表示
+
+// --- 14-1c. お知らせ掲示欄（メニュー系の画面に常時出る折りたたみ枠） ---
+// 中身の取得は16章の checkAnnouncement() が行い、ここは「表示のしかた」だけを持つ。
+// ポップアップ(#announcementPanel)との違い：あちらは重要なお知らせを一度だけ知らせるもの、
+// こちらは閉じても消えず、メニューを開けば必ず目に入る看板。
+const announcementBoardEl = document.getElementById("announcementBoard");
+const announcementHeadlineEl = document.getElementById("announcementHeadline");
+const announcementBodyEl = document.getElementById("announcementBody");
+const announcementCaretEl = document.getElementById("announcementCaret");
+const ANNOUNCEMENT_COLLAPSED_KEY = "dogfightAnnouncementCollapsedId";
+let announcementId = ""; // 今表示しているお知らせのID（未取得なら空＝掲示欄を出さない）
+
+function setAnnouncementVisible(visible) {
+  // お知らせを取得できていないとき（サーバー停止中・ダウンロード版）は枠ごと出さない
+  announcementBoardEl.classList.toggle("shown", visible && !!announcementId);
+}
+
+// たたんだ状態は「どのお知らせをたたんだか」で覚える。新しいお知らせが出れば
+// IDが変わるので、自動的に開いた状態で表示される。
+function setAnnouncementCollapsed(collapsed) {
+  announcementBoardEl.classList.toggle("collapsed", collapsed);
+  announcementCaretEl.textContent = collapsed ? "▼" : "▲";
+  try { localStorage.setItem(ANNOUNCEMENT_COLLAPSED_KEY, collapsed ? announcementId : ""); } catch {}
+}
+
+function showAnnouncementBoard(id, message) {
+  announcementId = id;
+  const lines = String(message).split("\n");
+  announcementHeadlineEl.textContent = lines[0];
+  const body = lines.slice(1).join("\n").trim();
+  announcementBodyEl.textContent = body;
+  // 1行だけのお知らせは折りたたむ中身が無いので、開閉させない
+  announcementBoardEl.classList.toggle("noBody", !body);
+
+  let collapsedId = "";
+  try { collapsedId = localStorage.getItem(ANNOUNCEMENT_COLLAPSED_KEY) || ""; } catch {}
+  setAnnouncementCollapsed(!!body && collapsedId === id);
+  // 取得は非同期なので、届いた時点で既にメニューを離れている場合がある。
+  // ANNOUNCEMENT_SCREENS は画面名なので、phase と比べるために変換する。
+  setAnnouncementVisible(ANNOUNCEMENT_SCREENS.some((s) => SCREEN_PHASE[s] === phase));
+}
+
+document.getElementById("announcementToggle").addEventListener("click", () => {
+  if (announcementBoardEl.classList.contains("noBody")) return;
+  setAnnouncementCollapsed(!announcementBoardEl.classList.contains("collapsed"));
+});
 
 // メニュー画面内の各種メッセージ欄（他のHUD要素と違い動的に生成されないので、ここで一括してconst化）
 const menuNoteEl = document.getElementById("menuNote");
@@ -3950,7 +4035,13 @@ function rotateTip() {
 rotateTip();
 setInterval(rotateTip, 8000);
 
-// --- お知らせポップアップ：起動時に一度だけサーバーに確認し、前回見たものと違えば表示する ---
+// --- お知らせ：起動時に一度だけサーバーに確認する ---
+// 取得したお知らせは2つの出しかたをする。
+//   掲示欄（14-1c）: 必ず出す。閉じても消えず、メニューを開けば毎回目に入る。
+//   ポップアップ    : announcement.json に "important": true があるときだけ。
+//                     一度閉じたら、同じIDの間は二度と出ない。
+// つまり important は「今すぐ全員に読ませたいか」の指定であって、
+// 掲示欄に載るかどうかとは無関係（載るものは常に載る）。
 const announcementPanelEl = document.getElementById("announcementPanel");
 const announcementMessageEl = document.getElementById("announcementMessage");
 function checkAnnouncement() {
@@ -3959,6 +4050,8 @@ function checkAnnouncement() {
     .then((res) => (res.ok ? res.json() : null))
     .then((data) => {
       if (!data || !data.message || !data.id) return;
+      showAnnouncementBoard(data.id, data.message);
+      if (!data.important) return;
       let seenId = "";
       try { seenId = localStorage.getItem("dogfightSeenAnnouncementId") || ""; } catch {}
       if (data.id === seenId) return;
