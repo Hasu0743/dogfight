@@ -247,6 +247,10 @@
     background: #0b1620; color: #eafff0; border: 1px solid #567; font-size: 14px;
   }
   #rankDisplay { color: #ffd166; font-size: 13px; margin: 0; }
+  #graphicsQualitySelect {
+    width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px;
+    background: #0b1620; color: #eafff0; border: 1px solid #567; font-size: 14px;
+  }
 
   /* ============================================================
      10. チャット（オンライン対戦中のみ表示）
@@ -512,6 +516,10 @@
       <button class="menuBtn" id="friendAddBtn">追加</button>
     </div>
     <div id="friendList"></div>
+
+    <h3>画質</h3>
+    <select id="graphicsQualitySelect"></select>
+    <p class="friendNote">動きがカクつくときは「低」にしてください。設定は次回以降も保持されます（雲の細かさだけは次回の起動から反映）。</p>
 
     <h3>キー操作</h3>
     <div id="keyBindRows"></div>
@@ -1294,69 +1302,235 @@ window.addEventListener("keydown", (e) => {
 // ================================================================
 // 3. シーン・カメラ・レンダラー
 // ================================================================
+// --- 3-1. 画質設定 ---
+// 低／中／高 の3段階。切り替えるのは「描画解像度」と「地面テクスチャの鮮明さ」だけで、
+// 見える物の量は変えない（雲や機体の数を減らすと、動きの手がかりが減って操縦に響くため）。
+// 描画解像度＝ピクセル比。高解像度ディスプレイでは1より大きく、そのまま使うと
+// くっきりする代わりに描く点の数が2乗で増えるので、上限を設けて重さを抑える。
+// （アンチエイリアスは描画面を作る瞬間にしか決められないため、常にオンにしてある）
+const GRAPHICS_QUALITY_KEY = "dogfightGraphicsQuality";
+const GRAPHICS_PRESETS = {
+  low:  { label: "低（軽さ優先）",     pixelRatioCap: 1,   anisotropy: 1 },
+  mid:  { label: "中",                 pixelRatioCap: 1.5, anisotropy: 4 },
+  high: { label: "高（きれいさ優先）", pixelRatioCap: 2,   anisotropy: 16 },
+};
+function loadGraphicsQuality() {
+  try {
+    const q = localStorage.getItem(GRAPHICS_QUALITY_KEY);
+    if (GRAPHICS_PRESETS[q]) return q;
+  } catch {}
+  return "high";
+}
+let graphicsQuality = loadGraphicsQuality();
+
+// --- 3-2. シーン・カメラ・レンダラー ---
+// 空の色は「真上は濃い青、地平線に近づくほど白っぽい」が自然。霧の色を地平線の色と
+// 一致させておくと、遠くの地面が空へ溶け込み、地面の端が見えなくなる。
+const SKY_ZENITH = new THREE.Color(0x2f6fd0);
+const SKY_HORIZON = new THREE.Color(0xc4dcf2);
+const SUN_DIR = new THREE.Vector3(300, 500, 100).normalize(); // 太陽の方向（光と空の太陽を一致させる）
+
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x8fc6ff);
-scene.fog = new THREE.Fog(0x8fc6ff, 500, 14000); // 高高度(11,000m級)からでも地面がうっすら見えるよう遠方まで伸ばす
+scene.background = SKY_HORIZON.clone(); // 空のドームが描けなかった場合の保険
+scene.fog = new THREE.Fog(SKY_HORIZON, 500, 14000); // 高高度(11,000m級)からでも地面がうっすら見えるよう遠方まで伸ばす
 
 const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.5, 20000);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+// 色の扱いを写真と同じ流儀（sRGB＋トーンマッピング）にする。明るい所が白飛びせず、
+// 太陽に照らされた面と日陰の差が自然に出る。
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 document.body.appendChild(renderer.domElement);
 
-window.addEventListener("resize", () => {
+function resizeRenderer() {
+  const cap = GRAPHICS_PRESETS[graphicsQuality].pixelRatioCap;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, cap));
+  renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+}
+resizeRenderer();
+window.addEventListener("resize", resizeRenderer);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-sun.position.set(300, 500, 100);
+// --- 3-3. 光 ---
+// 以前は全方向から同じ明るさで照らす光（環境光）だけだったので、機体がのっぺりして
+// 立体感が出なかった。空からの青い光と地面からの照り返し（半球光）に変え、
+// 上面は明るく下面はやや暗く見えるようにする。
+scene.add(new THREE.HemisphereLight(0xd6e8ff, 0x55704a, 0.55)); // 映り込み（3-4）も明るさを足すので控えめ
+const sun = new THREE.DirectionalLight(0xfff1dc, 2.6);
+sun.position.copy(SUN_DIR).multiplyScalar(1000);
 scene.add(sun);
 
-// 地面：単色の平面だけだと高高度から見た時に距離感の手がかりが無く、高度が掴みにくかったため、
-// 畑のような市松模様のテクスチャを敷いて、どんな高度からでも遠近感（視差）が働くようにする。
+// --- 3-4. 空 ---
+// 巨大な球を内側から見て、そこに空のグラデーションと太陽を描く。
+// 常にカメラと一緒に動かし（updateSky）、どこまで飛んでも空の果てに着かないようにする。
+// gl_Position.z ≒ w は「一番奥に描く」指定で、雲や機体の後ろに必ず回る。
+const skyMat = new THREE.ShaderMaterial({
+  uniforms: {
+    zenith: { value: SKY_ZENITH },
+    horizon: { value: SKY_HORIZON },
+    sunDir: { value: SUN_DIR },
+  },
+  vertexShader: `
+    varying vec3 vDir;
+    void main() {
+      vDir = position;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      // ちょうど w にすると計算誤差で奥行きの限界をわずかに越え、下半分が消えることがある
+      gl_Position.z = gl_Position.w * 0.99999;
+    }`,
+  fragmentShader: `
+    uniform vec3 zenith;
+    uniform vec3 horizon;
+    uniform vec3 sunDir;
+    varying vec3 vDir;
+    void main() {
+      vec3 d = normalize(vDir);
+      // 地平線より下は霧の色のまま（地面の向こうと空の境目を作らない）
+      float h = max(d.y, 0.0);
+      // 地平線から離れるほど青くする。地平線ちょうどで色の変化が急すぎると折れ目に見えるので、
+      // 立ち上がりがなめらかな曲線を使う。
+      vec3 col = mix(horizon, zenith, 1.0 - pow(1.0 - h, 2.5));
+      // 太陽：くっきりした円盤と、その周りのにじみ
+      float s = max(dot(d, sunDir), 0.0);
+      col += vec3(1.0, 0.92, 0.78) * (pow(s, 1200.0) * 6.0 + pow(s, 24.0) * 0.35);
+      gl_FragColor = vec4(col, 1.0);
+      #include <colorspace_fragment>
+    }`,
+  side: THREE.BackSide,
+  depthWrite: false,
+  fog: false,
+  // 霧（遠くの地面）は写真風の色処理を通らずに指定した色そのままで出る。空だけ処理すると
+  // 地平線で色が食い違って境目が見えてしまうので、空も処理しないで揃える。
+  toneMapped: false,
+});
+const sky = new THREE.Mesh(new THREE.SphereGeometry(1000, 32, 16), skyMat);
+sky.frustumCulled = false;
+scene.add(sky);
+
+// 映り込み用の景色。金属や風防のような艶のある面は、周りの景色を映すことで光って見える。
+// 何も与えないと真っ黒になるので、この空そのものを映り込み用に1回だけ焼いておく。
+{
+  const envScene = new THREE.Scene();
+  envScene.add(new THREE.Mesh(new THREE.SphereGeometry(1000, 32, 16), skyMat));
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(envScene, 0.02).texture;
+  pmrem.dispose();
+}
+
+// --- 3-5. 地面 ---
+// 単色の平面だけだと高高度から見た時に距離感の手がかりが無く、高度が掴みにくい。
+// 色の違う畑を並べたテクスチャを敷いて、どんな高度からでも遠近感（視差）が働くようにする。
+// 1枚のテクスチャ＝1km四方（8×8区画、1区画約125m）。毎回同じ乱数で作るので、
+// どの端末でも同じ模様になる。
+const GROUND_TILE_M = 1000;
 function makeGroundTexture() {
-  const size = 256;
+  const size = 1024;
   const cnv = document.createElement("canvas");
   cnv.width = cnv.height = size;
   const c = cnv.getContext("2d");
-  c.fillStyle = "#2f6b3a";
-  c.fillRect(0, 0, size, size);
-  c.fillStyle = "#376f42";
-  const tile = size / 8;
-  for (let y = 0; y < 8; y++) {
-    for (let x = 0; x < 8; x++) {
-      if ((x + y) % 2 === 0) c.fillRect(x * tile, y * tile, tile, tile);
+  let seed = 7;
+  const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  // 色の差を控えめにする（差が大きいと、上空から見たときにモザイク画のように見える）
+  const FIELD_COLORS = ["#4a7a42", "#52833f", "#5b8a44", "#66894a", "#6f8a4e", "#5a7a3e", "#46703c", "#728050"];
+  const n = 8;
+  const cell = size / n;
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      c.fillStyle = FIELD_COLORS[Math.floor(rand() * FIELD_COLORS.length)];
+      c.fillRect(x * cell, y * cell, cell, cell);
+      // 畝（うね）の筋。区画ごとに向きを変え、近くを飛んだときに速さが感じられるようにする
+      c.globalAlpha = 0.12;
+      c.fillStyle = "#000";
+      const horizontal = rand() < 0.5;
+      for (let k = 0; k < cell; k += 6) {
+        if (horizontal) c.fillRect(x * cell, y * cell + k, cell, 2);
+        else c.fillRect(x * cell + k, y * cell, 2, cell);
+      }
+      c.globalAlpha = 1;
     }
   }
+  // 区画の境目のあぜ道。以前の格子線（GridHelper）の役目をここで引き継ぐ
+  c.fillStyle = "rgba(40, 52, 30, 0.85)";
+  for (let i = 0; i <= n; i++) {
+    c.fillRect(i * cell - 2, 0, 4, size);
+    c.fillRect(0, i * cell - 2, size, 4);
+  }
   const tex = new THREE.CanvasTexture(cnv);
+  tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(80, 80); // 20,000m四方に1区画250m相当のマス目を敷き詰める
   return tex;
 }
-const groundGeo = new THREE.PlaneGeometry(20000, 20000);
-const groundMat = new THREE.MeshStandardMaterial({ map: makeGroundTexture() });
-const ground = new THREE.Mesh(groundGeo, groundMat);
+const GROUND_SIZE_M = 40000;
+const groundTex = makeGroundTexture();
+groundTex.repeat.set(GROUND_SIZE_M / GROUND_TILE_M, GROUND_SIZE_M / GROUND_TILE_M);
+const groundMat = new THREE.MeshStandardMaterial({ map: groundTex, roughness: 1, metalness: 0 });
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(GROUND_SIZE_M, GROUND_SIZE_M), groundMat);
 ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
-const grid = new THREE.GridHelper(20000, 200, 0x1c4a26, 0x1c4a26);
-scene.add(grid);
 
-// 雲代わりの目印（動きが分かりやすいように点在させる）
-const cloudGeo = new THREE.SphereGeometry(1, 6, 6);
-const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 });
-for (let i = 0; i < 360; i++) {
-  const puff = new THREE.Mesh(cloudGeo, cloudMat);
-  const s = 20 + Math.random() * 60;
-  puff.scale.set(s, s * 0.6, s);
-  puff.position.set(
-    (Math.random() - 0.5) * 8000,
-    Math.random() * 6000,
-    (Math.random() - 0.5) * 8000
-  );
-  scene.add(puff);
+// 地面のくっきり度。斜めに見下ろしたとき遠くの畑がぼやけたりチラついたりするのを防ぐ。
+function applyGroundSharpness() {
+  const want = GRAPHICS_PRESETS[graphicsQuality].anisotropy;
+  groundTex.anisotropy = Math.min(want, renderer.capabilities.getMaxAnisotropy());
+  groundTex.needsUpdate = true;
 }
+applyGroundSharpness();
+
+// 空と地面をカメラに付いて行かせる（毎フレーム、描画の直前に呼ぶ）。
+// 地面はテクスチャ1枚分の幅で区切って動かすので、模様自体は地上に固定されたまま見える。
+function updateSky() {
+  sky.position.copy(camera.position);
+  ground.position.x = Math.round(camera.position.x / GROUND_TILE_M) * GROUND_TILE_M;
+  ground.position.z = Math.round(camera.position.z / GROUND_TILE_M) * GROUND_TILE_M;
+}
+
+function setGraphicsQuality(q) {
+  if (!GRAPHICS_PRESETS[q]) return;
+  graphicsQuality = q;
+  try { localStorage.setItem(GRAPHICS_QUALITY_KEY, q); } catch {}
+  resizeRenderer();
+  applyGroundSharpness();
+}
+
+// --- 3-6. 雲 ---
+// 動きの手がかりとして空中に点在させる目印。1つの雲を大小の玉5つで作り、
+// 光で上面が明るく下面が灰色がかるようにして、綿のような立体感を出す。
+// 玉は全部で1800個あるが「同じ形を位置だけ変えて並べる」描き方（インスタンス描画）
+// なので、1回の描画命令で済み重くならない。
+const CLOUD_COUNT = 360;
+const PUFFS_PER_CLOUD = 5;
+const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x8094ad, emissiveIntensity: 0.35 });
+// 画質「低」では玉の面の数を1/4にする（起動時の設定で決まり、切り替えは次回起動から効く）
+const CLOUD_DETAIL = graphicsQuality === "low" ? 1 : 2;
+const clouds = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, CLOUD_DETAIL), cloudMat, CLOUD_COUNT * PUFFS_PER_CLOUD);
+{
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const p = new THREE.Vector3();
+  const sc = new THREE.Vector3();
+  let k = 0;
+  for (let i = 0; i < CLOUD_COUNT; i++) {
+    const s = 20 + Math.random() * 60;
+    const cx = (Math.random() - 0.5) * 8000;
+    const cy = Math.random() * 6000;
+    const cz = (Math.random() - 0.5) * 8000;
+    for (let j = 0; j < PUFFS_PER_CLOUD; j++) {
+      // 1つ目が真ん中の大きな玉、残りはその周りに低めに散らす（底が平らな積雲の形）
+      const r = j === 0 ? s : s * (0.45 + Math.random() * 0.4);
+      const ang = Math.random() * Math.PI * 2;
+      const dist = j === 0 ? 0 : s * (0.6 + Math.random() * 0.6);
+      p.set(cx + Math.cos(ang) * dist, cy + (j === 0 ? s * 0.15 : -s * 0.1), cz + Math.sin(ang) * dist);
+      sc.set(r, r * 0.62, r);
+      m.compose(p, q, sc);
+      clouds.setMatrixAt(k++, m);
+    }
+  }
+  clouds.instanceMatrix.needsUpdate = true;
+  clouds.computeBoundingSphere();
+}
+scene.add(clouds);
 
 
 // ================================================================
@@ -1385,10 +1559,13 @@ function makeMarkerTexture(color) {
   c.arc(0, -20, 4, 0, Math.PI * 2); // 機首
   c.fillStyle = "#ffffff";
   c.fill();
-  return new THREE.CanvasTexture(cnv);
+  const tex = new THREE.CanvasTexture(cnv);
+  tex.colorSpace = THREE.SRGBColorSpace; // 描いた色そのままで表示されるように
+  return tex;
 }
 const enemyMarkerSprite = new THREE.Sprite(new THREE.SpriteMaterial({
   map: makeMarkerTexture("#ff3b3b"), depthTest: false, depthWrite: false, transparent: true, fog: false,
+  toneMapped: false, // 視認用の発光サインなので、写真風の色処理でくすませない
 }));
 enemyMarkerSprite.renderOrder = 999;
 scene.add(enemyMarkerSprite);
@@ -1401,10 +1578,10 @@ scene.add(enemyMarkerSprite);
 //     速度方向へ伸ばし「高速で飛ぶ弾のブレ」として描く（自機＝淡黄／敵機＝橙）。 ---
 const tracerGeo = new THREE.CylinderGeometry(TRACER_RADIUS, TRACER_RADIUS, 1, 5, 1, true);
 const tracerMatOwn = new THREE.MeshBasicMaterial({
-  color: 0xfff0a0, transparent: true, opacity: 0.95, depthWrite: false, fog: false,
+  color: 0xfff0a0, transparent: true, opacity: 0.95, depthWrite: false, fog: false, toneMapped: false,
 });
 const tracerMatFoe = new THREE.MeshBasicMaterial({
-  color: 0xff5a2b, transparent: true, opacity: 0.95, depthWrite: false, fog: false,
+  color: 0xff5a2b, transparent: true, opacity: 0.95, depthWrite: false, fog: false, toneMapped: false,
 });
 
 // 弾はひたすら撃ち続けるため、毎回オブジェクトを作らずプールを順番に使い回す
@@ -1461,44 +1638,225 @@ function clearTracers() {
 // 5. 機体モデル生成・状態オブジェクト生成
 // ================================================================
 
-// --- 5-1. 低ポリ機体モデルを作る ---
-function buildAircraftMesh(params) {
-  const group = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: params.color, metalness: 0.3, roughness: 0.6 });
+// --- 5-1. 機体モデルを作る ---
+// 見た目だけのモデルで、当たり判定・物理には一切関わらない（位置と向きを写すだけ）。
+// 座標の約束：機首が -z、上が +y、右翼が +x。寸法は AIRCRAFT_DB の胴体長・翼幅から決める。
+//
+// 形・材質は機種ごとに1回だけ作って使い回す（AIRCRAFT_PARTS_CACHE）。対戦のたびに
+// 作り直すと、捨てた形がGPUのメモリに溜まっていくため。
 
-  const noseLen = params.fuselageLen * 0.28;
-  const bodyLen = params.fuselageLen * 0.72;
+// 双発機（エンジン2基）。尾翼の枚数とは一致しない（F-4・F-5は単垂直尾翼で双発）ので別に持つ。
+const TWIN_ENGINE_TYPES = new Set(["SU27", "F5", "F4", "MIG29", "F14", "F15", "FA18"]);
 
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.55, noseLen, 8), mat);
-  nose.rotation.x = -Math.PI / 2;
-  nose.position.z = -(bodyLen / 2 + noseLen / 2);
-  group.add(nose);
+// 翼の形（上から見た台形）を厚みのある板にする。
+//   halfSpan  : 片翼の長さ（0 を渡すと中心から片側だけの板＝垂直尾翼用には使わない）
+//   rootChord : 付け根の前後の長さ / tipChord: 翼端の前後の長さ
+//   sweep     : 翼端の前縁が付け根よりどれだけ後ろにあるか（後退角）
+// 出来上がりは x が翼幅方向、z が前後（+z が後ろ）、原点が付け根の前縁。
+function makeWingGeometry(halfSpan, rootChord, tipChord, sweep, thickness) {
+  const s = new THREE.Shape();
+  s.moveTo(-halfSpan, sweep);
+  s.lineTo(0, 0);
+  s.lineTo(halfSpan, sweep);
+  s.lineTo(halfSpan, sweep + tipChord);
+  s.lineTo(0, rootChord);
+  s.lineTo(-halfSpan, sweep + tipChord);
+  s.closePath();
+  const g = new THREE.ExtrudeGeometry(s, { depth: thickness, bevelEnabled: false });
+  g.rotateX(Math.PI / 2);          // 平面の縦(y)を前後(z)に倒す
+  g.translate(0, thickness / 2, 0); // 厚みを上下に振り分ける
+  return g;
+}
 
-  const body = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.0, bodyLen), mat);
-  group.add(body);
+// 垂直尾翼。x が厚み、y が高さ、z が前後。原点が付け根の前縁。
+function makeFinGeometry(height, rootChord, tipChord, sweep, thickness) {
+  const s = new THREE.Shape();
+  s.moveTo(0, 0);
+  s.lineTo(rootChord, 0);
+  s.lineTo(sweep + tipChord, height);
+  s.lineTo(sweep, height);
+  s.closePath();
+  const g = new THREE.ExtrudeGeometry(s, { depth: thickness, bevelEnabled: false });
+  g.rotateY(-Math.PI / 2);          // 平面の横(x)を前後(z)へ
+  g.translate(thickness / 2, 0, 0);
+  return g;
+}
 
-  const wing = new THREE.Mesh(new THREE.BoxGeometry(params.wingSpan, 0.12, params.fuselageLen * 0.34), mat);
-  wing.position.z = params.fuselageLen * 0.05;
-  group.add(wing);
+// 胴体。断面が円の回転体で、機首は尖らせ、尾部は少しすぼめる。
+function makeFuselageGeometry(len, radius, isProp) {
+  const L = len / 2;
+  // [半径, 前後位置] を機首側から並べる（回転体は y 軸まわりに作り、あとで前後へ倒す）
+  const prof = isProp
+    ? [[0.55, -L], [0.95, -L + len * 0.06], [1.0, -L + len * 0.25], [0.85, -L + len * 0.6], [0.3, L]]
+    : [[0.0, -L], [0.45, -L + len * 0.12], [0.85, -L + len * 0.26], [1.0, -L + len * 0.42], [1.0, -L + len * 0.8], [0.72, L]];
+  const pts = prof.map(([r, y]) => new THREE.Vector2(r * radius, y));
+  const g = new THREE.LatheGeometry(pts, 16);
+  g.rotateX(Math.PI / 2); // 回転軸 y を前後 z に（機首が -z 側になる）
+  return g;
+}
 
-  const tailWing = new THREE.Mesh(new THREE.BoxGeometry(params.wingSpan * 0.55, 0.1, params.fuselageLen * 0.16), mat);
-  tailWing.position.z = bodyLen / 2 - params.fuselageLen * 0.05;
-  group.add(tailWing);
+const AIRCRAFT_PARTS_CACHE = new Map();
+function aircraftParts(typeKey, params) {
+  if (AIRCRAFT_PARTS_CACHE.has(typeKey)) return AIRCRAFT_PARTS_CACHE.get(typeKey);
+  const isProp = params.category === "prop";
+  const len = params.fuselageLen;
+  const R = isProp ? 0.5 : 0.55;
+  const half = params.wingSpan / 2;
 
-  function addFin(offsetX) {
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.1, params.fuselageLen * 0.2), mat);
-    fin.position.set(offsetX, 0.7, bodyLen / 2 - params.fuselageLen * 0.05);
-    group.add(fin);
-  }
-  if (params.twinTail) {
-    addFin(-0.55);
-    addFin(0.55);
+  const parts = { isProp, len, R, half };
+  parts.body = new THREE.MeshStandardMaterial({ color: params.color, metalness: 0.35, roughness: 0.5 });
+  // 操縦席の風防。暗い色の艶あり（周りの空が映り込んだように見える）
+  parts.glass = new THREE.MeshStandardMaterial({ color: 0x24384d, metalness: 0.6, roughness: 0.08 });
+  parts.metal = new THREE.MeshStandardMaterial({ color: 0x55585e, metalness: 0.7, roughness: 0.4 });
+
+  parts.fuselage = makeFuselageGeometry(len, R, isProp);
+  parts.canopy = new THREE.SphereGeometry(R * 0.72, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+
+  if (isProp) {
+    // レシプロ機：ほぼ直線の翼。付け根が前寄り。
+    parts.wing = makeWingGeometry(half, len * 0.36, len * 0.18, len * 0.04, 0.12);
+    parts.wingZ = -len * 0.22;
+    parts.tail = makeWingGeometry(params.wingSpan * 0.2, len * 0.17, len * 0.09, len * 0.02, 0.08);
+    parts.fin = makeFinGeometry(len * 0.2, len * 0.2, len * 0.1, len * 0.06, 0.08);
+    parts.spinner = new THREE.ConeGeometry(R * 0.5, R * 1.1, 12);
+    parts.spinner.rotateX(-Math.PI / 2);
+    parts.blade = new THREE.BoxGeometry(0.16, half * 0.55, 0.05);
+    parts.blade.translate(0, half * 0.275, 0);
+    // 回っているプロペラは羽根が見えず円盤状にかすんで見えるので、半透明の円で表す
+    parts.propDisc = new THREE.CircleGeometry(half * 0.55, 24);
+    parts.propDiscMat = new THREE.MeshBasicMaterial({
+      color: 0x222222, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide,
+    });
   } else {
-    addFin(0);
+    // ジェット機：後退翼。前縁が翼端に向かって後ろへ下がる。
+    parts.wing = makeWingGeometry(half, len * 0.42, len * 0.12, half * 0.75, 0.12);
+    parts.wingZ = -len * 0.1;
+    const tailHalf = params.wingSpan * 0.2;
+    parts.tail = makeWingGeometry(tailHalf, len * 0.18, len * 0.07, tailHalf * 0.8, 0.08);
+    parts.fin = makeFinGeometry(len * 0.22, len * 0.22, len * 0.08, len * 0.18, 0.08);
+    // 排気ノズルとアフターバーナーの炎。外側が橙、芯が明るい黄白色の半透明。
+    // （光を足し合わせる描き方だと、明るい空の前では真っ白に飛んでしまうため使わない）
+    parts.nozzle = new THREE.CylinderGeometry(R * 0.42, R * 0.5, len * 0.07, 14, 1, true);
+    parts.nozzle.rotateX(Math.PI / 2);
+    parts.flame = new THREE.ConeGeometry(R * 0.38, 1, 12, 1, true);
+    parts.flame.translate(0, 0.5, 0);
+    parts.flame.rotateX(Math.PI / 2); // 先端が後ろ(+z)を向く、長さ1の円錐
+    parts.flameOuterMat = new THREE.MeshBasicMaterial({
+      color: 0xff8a3a, transparent: true, opacity: 0.55,
+      depthWrite: false, fog: false, toneMapped: false, side: THREE.DoubleSide,
+    });
+    parts.flameCoreMat = new THREE.MeshBasicMaterial({
+      color: 0xfff1c8, transparent: true, opacity: 0.85,
+      depthWrite: false, fog: false, toneMapped: false, side: THREE.DoubleSide,
+    });
   }
+  // 翼端灯：左が赤・右が緑（実機と同じ）。遠目でも機体の向きを読み取る手がかりになる
+  parts.navLight = new THREE.SphereGeometry(0.12, 8, 6);
+  parts.navRed = new THREE.MeshBasicMaterial({ color: 0xff2a2a, toneMapped: false });
+  parts.navGreen = new THREE.MeshBasicMaterial({ color: 0x2aff6a, toneMapped: false });
+
+  AIRCRAFT_PARTS_CACHE.set(typeKey, parts);
+  return parts;
+}
+
+function buildAircraftMesh(params, typeKey) {
+  const P = aircraftParts(typeKey, params);
+  const { len, R, half } = P;
+  const group = new THREE.Group();
+  const add = (geo, mat, x = 0, y = 0, z = 0) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    group.add(m);
+    return m;
+  };
+
+  add(P.fuselage, P.body);
+
+  const canopy = add(P.canopy, P.glass, 0, R * 0.55, P.isProp ? -len * 0.02 : -len * 0.22);
+  canopy.scale.set(1, 0.85, P.isProp ? 1.6 : 2.3);
+
+  add(P.wing, P.body, 0, P.isProp ? -R * 0.35 : 0, P.wingZ);
+  add(P.tail, P.body, 0, P.isProp ? R * 0.1 : 0, len / 2 - len * (P.isProp ? 0.17 : 0.2));
+
+  const finZ = len / 2 - len * (P.isProp ? 0.2 : 0.24);
+  if (params.twinTail) {
+    for (const side of [-1, 1]) {
+      const fin = add(P.fin, P.body, side * R * 0.75, R * 0.5, finZ);
+      fin.rotation.z = -side * 0.22; // 双垂直尾翼は少し外側へ開いている
+      fin.scale.set(1, 0.8, 0.85);    // 2枚あるぶん1枚あたりは小さめ
+    }
+  } else {
+    add(P.fin, P.body, 0, R * 0.7, finZ);
+  }
+
+  // 翼端灯（翼端の前縁あたり）
+  const tipZ = P.wingZ + (P.isProp ? len * 0.04 : half * 0.75) + 0.1;
+  const wingY = P.isProp ? -R * 0.35 : 0;
+  add(P.navLight, P.navRed, -half, wingY, tipZ);
+  add(P.navLight, P.navGreen, half, wingY, tipZ);
+
+  const fx = { flames: [], prop: null };
+  if (P.isProp) {
+    const hub = new THREE.Group();
+    hub.position.z = -len / 2 - R * 0.35;
+    group.add(hub);
+    hub.add(new THREE.Mesh(P.spinner, P.metal));
+    const blades = new THREE.Group();
+    for (let i = 0; i < 3; i++) {
+      const b = new THREE.Mesh(P.blade, P.metal);
+      b.rotation.z = (i / 3) * Math.PI * 2;
+      blades.add(b);
+    }
+    hub.add(blades);
+    const disc = new THREE.Mesh(P.propDisc, P.propDiscMat);
+    hub.add(disc);
+    fx.prop = blades;
+  } else {
+    const xs = TWIN_ENGINE_TYPES.has(typeKey) ? [-R * 0.45, R * 0.45] : [0];
+    const nozzleR = xs.length > 1 ? 0.62 : 1; // 双発はノズルを細めにして2つ並べる
+    for (const x of xs) {
+      const nz = add(P.nozzle, P.metal, x, 0, len / 2 + len * 0.025);
+      nz.scale.set(nozzleR, nozzleR, 1);
+      const outer = add(P.flame, P.flameOuterMat, x, 0, len / 2 + len * 0.06);
+      const core = add(P.flame, P.flameCoreMat, x, 0, len / 2 + len * 0.06);
+      outer.scale.set(nozzleR, nozzleR, 0);
+      core.scale.set(nozzleR * 0.55, nozzleR * 0.55, 0);
+      fx.flames.push({ outer, core, r: nozzleR });
+    }
+  }
+  group.userData.fx = fx;
 
   group.scale.setScalar(VISUAL_SCALE);
   return group;
+}
+
+// 毎フレーム、スロットルに合わせてエンジンの見た目を動かす（描画の直前に呼ぶ）。
+// ・ジェット：85%を超えるとアフターバーナー点火とみなして炎を大きく伸ばす。
+//   それ未満は排気の揺らぎがうっすら見える程度。小刻みに長さを揺らして燃えている感じを出す。
+// ・レシプロ：スロットルに応じた速さでプロペラを回す。
+function updateAircraftVisuals(dt) {
+  const t = performance.now() / 1000;
+  for (const c of combatants) {
+    const fx = c.mesh && c.mesh.userData.fx;
+    if (!fx || !c.mesh.visible) continue;
+    const thr = c.throttle || 0;
+    if (fx.prop) {
+      fx.prop.rotation.z += dt * (10 + thr * 25);
+    }
+    if (fx.flames.length) {
+      const ab = Math.max(0, (thr - 0.85) / 0.15);   // 0〜1：アフターバーナーの効き
+      const dry = Math.min(thr, 0.85) / 0.85;        // 0〜1：通常推力
+      const flicker = 1 + Math.sin(t * 47 + c.mesh.id) * 0.06 + Math.sin(t * 83) * 0.04;
+      const outerLen = (0.3 * dry + 2.0 * ab) * flicker;
+      const coreLen = (0.15 * dry + 1.1 * ab) * flicker;
+      for (const f of fx.flames) {
+        f.outer.visible = outerLen > 0.02;
+        f.core.visible = coreLen > 0.02;
+        f.outer.scale.z = outerLen;
+        f.core.scale.z = coreLen;
+      }
+    }
+  }
 }
 
 // --- 5-2. 機体の状態を作る（物理シミュレーションの本体データ） ---
@@ -1507,7 +1865,7 @@ function buildAircraftMesh(params) {
 // netId   : オンライン対戦で機体を識別するID（AI機・オフライン時は null）
 function createState(typeKey, position, headingDeg, isPlayer, opts) {
   const params = AIRCRAFT_DB[typeKey];
-  const mesh = buildAircraftMesh(params);
+  const mesh = buildAircraftMesh(params, typeKey);
   scene.add(mesh);
 
   const quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), headingDeg * DEG);
@@ -2651,6 +3009,8 @@ function animate() {
   updateADI();
   // 撃墜後・メニュー中も、既に飛んでいる弾は飛び続ける（自分を撃った弾の行方が見える）
   updateTracers(dt);
+  updateAircraftVisuals(dt); // 炎・プロペラ（5-1）
+  updateSky();               // 空と地面をカメラに付いて行かせる（3-5）
   renderer.render(scene, camera);
 }
 
@@ -4125,6 +4485,17 @@ const settingsCloseHandler = () => {
   settingsPanelEl.classList.remove("active");
 };
 document.getElementById("settingsClose").addEventListener("click", settingsCloseHandler);
+
+// 画質（3-1）。選んだ瞬間に反映し、端末に保存する
+const graphicsQualitySelectEl = document.getElementById("graphicsQualitySelect");
+for (const [key, preset] of Object.entries(GRAPHICS_PRESETS)) {
+  const opt = document.createElement("option");
+  opt.value = key;
+  opt.textContent = preset.label;
+  graphicsQualitySelectEl.appendChild(opt);
+}
+graphicsQualitySelectEl.value = graphicsQuality;
+graphicsQualitySelectEl.addEventListener("change", () => setGraphicsQuality(graphicsQualitySelectEl.value));
 document.getElementById("keyConfigReset").addEventListener("click", () => {
   keyBindings = Object.assign({}, DEFAULT_KEY_BINDINGS);
   saveKeyBindings();
