@@ -247,6 +247,7 @@
     background: #0b1620; color: #eafff0; border: 1px solid #567; font-size: 14px;
   }
   #rankDisplay { color: #ffd166; font-size: 13px; margin: 0; }
+  #volumeSlider { width: 100%; accent-color: #06d6a0; }
   #graphicsQualitySelect {
     width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px;
     background: #0b1620; color: #eafff0; border: 1px solid #567; font-size: 14px;
@@ -520,6 +521,9 @@
     <h3>画質</h3>
     <select id="graphicsQualitySelect"></select>
     <p class="friendNote">動きがカクつくときは「低」にしてください。設定は次回以降も保持されます（雲の細かさだけは次回の起動から反映）。</p>
+
+    <h3>音量 <span id="volumeValue"></span></h3>
+    <input type="range" id="volumeSlider" min="0" max="100" step="5">
 
     <h3>キー操作</h3>
     <div id="keyBindRows"></div>
@@ -1501,7 +1505,7 @@ function setGraphicsQuality(q) {
 // なので、1回の描画命令で済み重くならない。
 const CLOUD_COUNT = 360;
 const PUFFS_PER_CLOUD = 5;
-const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x8094ad, emissiveIntensity: 0.35 });
+const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x8094ad, emissiveIntensity: 0.5 });
 // 画質「低」では玉の面の数を1/4にする（起動時の設定で決まり、切り替えは次回起動から効く）
 const CLOUD_DETAIL = graphicsQuality === "low" ? 1 : 2;
 const clouds = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, CLOUD_DETAIL), cloudMat, CLOUD_COUNT * PUFFS_PER_CLOUD);
@@ -1631,6 +1635,273 @@ function clearTracers() {
     t.life = 0;
     t.mesh.visible = false;
   }
+}
+
+// --- 4-3. 爆発・炎・煙（パーティクル） ---
+// 撃墜の演出に使う。炎や煙の1粒1粒は「常にカメラの方を向く四角い板」に煙の模様を貼ったもの。
+// 粒は最大3000個あるが、同じ板を位置だけ変えて並べる描き方なので描画命令は1回で済む。
+// 動き（上昇・広がり・色の変化）は毎フレームここで計算して、まとめてGPUへ送る。
+// 見た目だけの演出で、命中判定などには関わらない。
+const FX_MAX = 3000;
+
+// 煙1粒の模様。丸いぼかしを不規則に重ねて、ふちが波打ったモコモコの形にする
+function makePuffTexture() {
+  const size = 128;
+  const cnv = document.createElement("canvas");
+  cnv.width = cnv.height = size;
+  const c = cnv.getContext("2d");
+  let seed = 11;
+  const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 18; i++) {
+    const r = size * (0.12 + rand() * 0.18);
+    const ang = rand() * Math.PI * 2;
+    const d = rand() * size * 0.22;
+    const x = size / 2 + Math.cos(ang) * d;
+    const y = size / 2 + Math.sin(ang) * d;
+    const g = c.createRadialGradient(x, y, 0, x, y, r);
+    const shade = Math.floor(170 + rand() * 85);
+    g.addColorStop(0, `rgba(${shade},${shade},${shade},0.55)`);
+    g.addColorStop(1, `rgba(${shade},${shade},${shade},0)`);
+    c.fillStyle = g;
+    c.fillRect(0, 0, size, size);
+  }
+  return new THREE.CanvasTexture(cnv);
+}
+
+const fxGeo = new THREE.InstancedBufferGeometry();
+{
+  const quad = new THREE.PlaneGeometry(1, 1);
+  fxGeo.index = quad.index;
+  fxGeo.setAttribute("position", quad.getAttribute("position"));
+  fxGeo.setAttribute("uv", quad.getAttribute("uv"));
+}
+const fxPosArr = new Float32Array(FX_MAX * 3);
+const fxSizeArr = new Float32Array(FX_MAX);
+const fxColorArr = new Float32Array(FX_MAX * 3);
+const fxAlphaArr = new Float32Array(FX_MAX);
+const fxRotArr = new Float32Array(FX_MAX);
+const fxAttrs = [
+  ["iPos", fxPosArr, 3], ["iSize", fxSizeArr, 1], ["iColor", fxColorArr, 3],
+  ["iAlpha", fxAlphaArr, 1], ["iRot", fxRotArr, 1],
+].map(([name, arr, n]) => {
+  const a = new THREE.InstancedBufferAttribute(arr, n);
+  a.setUsage(THREE.DynamicDrawUsage);
+  fxGeo.setAttribute(name, a);
+  return a;
+});
+fxGeo.instanceCount = 0;
+
+// 遠くの煙が霞むように、地面と同じ霧を自前で掛ける。色はすべて「画面に出す色そのもの」で扱う
+// （空・霧と同じく写真風の色処理は通さない。3-4 の空の説明を参照）。
+const FX_FOG_COLOR = SKY_HORIZON.clone().convertLinearToSRGB();
+const fxMat = new THREE.ShaderMaterial({
+  uniforms: {
+    map: { value: makePuffTexture() },
+    fogColor: { value: FX_FOG_COLOR },
+    fogNear: { value: scene.fog.near },
+    fogFar: { value: scene.fog.far },
+  },
+  vertexShader: `
+    attribute vec3 iPos;
+    attribute float iSize;
+    attribute vec3 iColor;
+    attribute float iAlpha;
+    attribute float iRot;
+    uniform float fogNear;
+    uniform float fogFar;
+    varying vec2 vUv;
+    varying vec3 vColor;
+    varying float vAlpha;
+    varying float vFog;
+    void main() {
+      vUv = uv;
+      vColor = iColor;
+      vAlpha = iAlpha;
+      // カメラの右方向・上方向に沿って板を広げる＝常にこちらを向く
+      vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+      vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+      float c = cos(iRot), s = sin(iRot);
+      vec2 p = vec2(c * position.x - s * position.y, s * position.x + c * position.y) * iSize;
+      vec4 mv = viewMatrix * vec4(iPos + right * p.x + up * p.y, 1.0);
+      vFog = smoothstep(fogNear, fogFar, -mv.z);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `
+    uniform sampler2D map;
+    uniform vec3 fogColor;
+    varying vec2 vUv;
+    varying vec3 vColor;
+    varying float vAlpha;
+    varying float vFog;
+    void main() {
+      vec4 t = texture2D(map, vUv);
+      float a = t.a * vAlpha;
+      if (a < 0.01) discard;
+      vec3 col = mix(vColor * (0.7 + 0.3 * t.r), fogColor, vFog);
+      gl_FragColor = vec4(col, a);
+    }`,
+  transparent: true,
+  depthWrite: false,
+  toneMapped: false,
+  fog: false,
+});
+const fxMesh = new THREE.Mesh(fxGeo, fxMat);
+fxMesh.frustumCulled = false;
+fxMesh.renderOrder = 10; // 曳光弾などの後に描く
+scene.add(fxMesh);
+
+// 粒の種類ごとの性質。色は [始まり, 終わり]、大きさは [生まれた時, 消える時]（m）
+const FX_KINDS = {
+  flash:  { life: [0.15, 0.25], size: [30, 70], c0: [1, 0.97, 0.85], c1: [1, 0.8, 0.4],  a: 0.95, drag: 0,   lift: 0,  grav: 0 },
+  fire:   { life: [0.5, 1.2],  size: [10, 28],  c0: [1, 0.78, 0.3],  c1: [0.55, 0.12, 0.03], a: 0.9, drag: 2.5, lift: 6, grav: 0 },
+  smoke:  { life: [3, 6],      size: [6, 26],  c0: [0.28, 0.27, 0.26], c1: [0.55, 0.55, 0.56], a: 0.75, drag: 1.2, lift: 4, grav: 0 },
+  trail:  { life: [2.5, 4.5],  size: [3, 16],  c0: [0.2, 0.19, 0.18], c1: [0.5, 0.5, 0.52], a: 0.7, drag: 0.8, lift: 2, grav: 0 },
+  debris: { life: [1.5, 3],    size: [0.8, 0.8], c0: [0.12, 0.11, 0.1], c1: [0.12, 0.11, 0.1], a: 1, drag: 0.3, lift: 0, grav: 9.8 },
+  dust:   { life: [4, 8],      size: [12, 45], c0: [0.45, 0.4, 0.33], c1: [0.62, 0.6, 0.56], a: 0.7, drag: 1.5, lift: 2, grav: 0 },
+  column: { life: [8, 14],     size: [25, 110], c0: [0.18, 0.17, 0.16], c1: [0.5, 0.5, 0.52], a: 0.55, drag: 0.4, lift: 14, grav: 0 },
+};
+
+const fxParticles = [];
+const rnd = (a, b) => a + Math.random() * (b - a);
+
+// pos: 発生位置、vel: 初速（m/s）。粒が上限に達しているときは新しい粒を諦める
+function spawnFx(kind, pos, vel, sizeScale = 1) {
+  if (fxParticles.length >= FX_MAX) return;
+  const k = FX_KINDS[kind];
+  fxParticles.push({
+    k, x: pos.x, y: pos.y, z: pos.z,
+    vx: vel.x, vy: vel.y, vz: vel.z,
+    age: 0, life: rnd(k.life[0], k.life[1]),
+    s0: k.size[0] * sizeScale, s1: k.size[1] * sizeScale,
+    rot: Math.random() * Math.PI * 2, rotV: rnd(-1, 1),
+  });
+}
+
+// 球状に散らばる初速を作る
+const _fxDir = new THREE.Vector3();
+function randomVel(speed, base) {
+  _fxDir.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).normalize().multiplyScalar(speed * rnd(0.3, 1));
+  if (base) _fxDir.add(base);
+  return _fxDir;
+}
+
+// 空中での爆発（撃墜した瞬間）
+function explodeInAir(pos, vel) {
+  const carry = vel.clone().multiplyScalar(0.3); // 爆風は機体の勢いを少し引き継ぐ
+  spawnFx("flash", pos, carry, 1.4);
+  for (let i = 0; i < 40; i++) spawnFx("fire", pos, randomVel(55, carry), rnd(1, 1.8));
+  for (let i = 0; i < 24; i++) spawnFx("smoke", pos, randomVel(30, carry), rnd(1.2, 2));
+  for (let i = 0; i < 24; i++) spawnFx("debris", pos, randomVel(90, carry));
+}
+
+// 地面に落ちたときの爆発
+function explodeOnGround(pos) {
+  const up = new THREE.Vector3(0, 12, 0);
+  spawnFx("flash", pos, up, 2);
+  for (let i = 0; i < 45; i++) spawnFx("fire", pos, randomVel(40, up), rnd(1.8, 3));
+  for (let i = 0; i < 20; i++) {
+    const v = randomVel(30, up);
+    v.y = Math.abs(v.y); // 土煙は地面より下へは行かない
+    spawnFx("dust", pos, v, rnd(1, 1.5));
+  }
+}
+
+// 煙を出し続けるもの：落ちていく残骸と、墜落地点から立ちのぼる黒煙
+const fxEmitters = [];
+
+// 撃墜された機体を残骸として落とす（9章の killCombatant から呼ぶ）。
+// 物理計算はもう回さないので、見た目の機体だけをここで動かす。
+function startWreck(c) {
+  const pos = c.mesh.position.clone();
+  const vel = c.velocity ? c.velocity.clone() : new THREE.Vector3();
+  explodeInAir(pos, vel);
+  fxEmitters.push({
+    type: "wreck", mesh: c.mesh, vel,
+    spin: new THREE.Vector3(rnd(-2, 2), rnd(-1, 1), rnd(-3, 3)),
+    acc: 0,
+  });
+}
+
+const _fxTmp = new THREE.Vector3();
+const _fxQ = new THREE.Quaternion();
+const _fxE = new THREE.Euler();
+function updateEmitters(dt) {
+  for (let i = fxEmitters.length - 1; i >= 0; i--) {
+    const e = fxEmitters[i];
+    if (e.type === "wreck") {
+      e.vel.y -= 9.8 * dt;                     // 落ちる
+      e.vel.multiplyScalar(1 - 0.12 * dt);     // 空気抵抗で少しずつ減速
+      e.mesh.position.addScaledVector(e.vel, dt);
+      _fxQ.setFromEuler(_fxE.set(e.spin.x * dt, e.spin.y * dt, e.spin.z * dt));
+      e.mesh.quaternion.multiply(_fxQ);        // きりもみ
+      // 炎と黒煙を引きながら落ちる（1秒に約40粒）
+      e.acc += dt;
+      while (e.acc > 0.025) {
+        e.acc -= 0.025;
+        _fxTmp.copy(e.vel).multiplyScalar(0.1);
+        spawnFx("trail", e.mesh.position, _fxTmp);
+        if (Math.random() < 0.6) spawnFx("fire", e.mesh.position, _fxTmp, 0.8);
+      }
+      if (e.mesh.position.y <= 0) {
+        e.mesh.position.y = 0;
+        explodeOnGround(e.mesh.position);
+        playExplosion(e.mesh.position, 1.2); // 17章
+        e.mesh.visible = false;
+        fxEmitters.splice(i, 1);
+        fxEmitters.push({ type: "column", pos: e.mesh.position.clone(), age: 0, life: 25, acc: 0 });
+      }
+    } else if (e.type === "column") {
+      // 墜落地点の黒煙。だんだん細くなって消える
+      e.age += dt;
+      e.acc += dt;
+      const rate = 0.12 + (e.age / e.life) * 0.4;
+      while (e.acc > rate) {
+        e.acc -= rate;
+        _fxTmp.set(rnd(-2, 2), rnd(4, 8), rnd(-2, 2));
+        spawnFx("column", e.pos, _fxTmp, 1 - (e.age / e.life) * 0.5);
+      }
+      if (e.age > e.life) fxEmitters.splice(i, 1);
+    }
+  }
+}
+
+// 毎フレーム：煙を出し続けるものを動かし、全粒を進めてGPUへ送る（描画の直前に呼ぶ）
+function updateFx(dt) {
+  updateEmitters(dt);
+  let n = 0;
+  for (let i = 0; i < fxParticles.length; i++) {
+    const p = fxParticles[i];
+    p.age += dt;
+    if (p.age >= p.life) continue;
+    const k = p.k;
+    const t = p.age / p.life;
+    const drag = 1 - k.drag * dt;
+    p.vx *= drag; p.vy *= drag; p.vz *= drag;
+    p.vy += (k.lift - k.grav) * dt;
+    p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+    if (p.y < 0) { p.y = 0; p.vy = 0; } // 地面より下には潜らない
+    p.rot += p.rotV * dt;
+
+    const ease = 1 - (1 - t) * (1 - t); // 最初に大きく膨らみ、だんだんゆっくりに
+    fxPosArr[n * 3] = p.x; fxPosArr[n * 3 + 1] = p.y; fxPosArr[n * 3 + 2] = p.z;
+    fxSizeArr[n] = p.s0 + (p.s1 - p.s0) * ease;
+    fxColorArr[n * 3] = k.c0[0] + (k.c1[0] - k.c0[0]) * t;
+    fxColorArr[n * 3 + 1] = k.c0[1] + (k.c1[1] - k.c0[1]) * t;
+    fxColorArr[n * 3 + 2] = k.c0[2] + (k.c1[2] - k.c0[2]) * t;
+    fxAlphaArr[n] = k.a * Math.min(1, p.age / 0.06) * (1 - t);
+    fxRotArr[n] = p.rot;
+    fxParticles[n++] = p;
+  }
+  fxParticles.length = n;
+  fxGeo.instanceCount = n;
+  for (const a of fxAttrs) a.needsUpdate = true;
+}
+
+// 対戦をやり直すとき、前の対戦の煙を持ち込まない
+function clearFx() {
+  fxParticles.length = 0;
+  fxEmitters.length = 0;
+  fxGeo.instanceCount = 0;
 }
 
 
@@ -2587,6 +2858,7 @@ function resetMatch(roster) {
   gameOver = false;
   camInit = false;
   clearTracers(); // 前の対戦で飛んでいた弾を持ち込まない
+  clearFx();      // 爆発・煙も同様（4-3）
   tracerAccum = new WeakMap();
   showSpectateNotice(false);
   updateMatchLabels();
@@ -2603,7 +2875,9 @@ function killCombatant(c) {
   c.deathHandled = true;
   c.alive = false;
   c.underFireMeter = 0;
-  c.mesh.visible = false;
+  // 以前はここで機体を消していた。今は爆発させ、炎と煙を引いて落ちる残骸にする（4-3）
+  startWreck(c);
+  playExplosion(c.mesh.position, 1); // 17章
   updateFocusTarget();
 }
 
@@ -2738,9 +3012,10 @@ function focusTargetForView() {
 }
 
 function updateEnemyIndicator() {
-  // 全機撃墜などで主目標が居ないときは、マーカーごと隠す
+  // 全機撃墜などで主目標が居ないとき・主目標が撃墜済みのときは、マーカーごと隠す
+  // （撃墜された機体は残骸として落ちていくので、印を付け続けると爆発が隠れてしまう）
   const foe = focusTargetForView();
-  if (!foe) {
+  if (!foe || !foe.alive) {
     enemyMarkerSprite.visible = false;
     enemyIndicatorEl.style.display = "none";
     return;
@@ -3010,6 +3285,8 @@ function animate() {
   // 撃墜後・メニュー中も、既に飛んでいる弾は飛び続ける（自分を撃った弾の行方が見える）
   updateTracers(dt);
   updateAircraftVisuals(dt); // 炎・プロペラ（5-1）
+  updateFx(dt);              // 爆発・残骸・煙（4-3）
+  updateAudio(dt);           // 効果音（17章）
   updateSky();               // 空と地面をカメラに付いて行かせる（3-5）
   renderer.render(scene, camera);
 }
@@ -4539,6 +4816,253 @@ feedbackSendEl.addEventListener("click", () => {
 });
 
 // デバッグ用に window に公開（自動テスト用）
+// ================================================================
+// 17. 効果音
+// ================================================================
+// 音声ファイルは使わず、ブラウザの音声合成（Web Audio）でその場で作る。
+// ファイルが要らないので、1ファイル構成とダウンロード版はそのまま保てる。
+//
+// 音の材料は2つだけ：
+//   ・ノイズ（ザーッという音）… 絞り方（フィルター）を変えると、エンジンの轟音・風切り音・
+//                               射撃音・爆発音になる
+//   ・発振器（ブーンという単音）… プロペラのうなり、ジェットの高音、失速警報
+// それぞれを常に鳴らしておき、音量だけを毎フレーム上げ下げする（updateAudio）。
+//
+// ブラウザは「ユーザーが一度クリックかキー操作をするまで音を出さない」決まりなので、
+// 最初の操作で音の仕組みを立ち上げる（initAudio）。
+
+const AUDIO_VOLUME_KEY = "dogfightVolume";
+function loadAudioVolume() {
+  try {
+    const v = localStorage.getItem(AUDIO_VOLUME_KEY);
+    if (v !== null && Number.isFinite(Number(v))) return Math.min(1, Math.max(0, Number(v)));
+  } catch {}
+  return 0.6;
+}
+let audioVolume = loadAudioVolume();
+const sfx = { ctx: null };
+
+function initAudio() {
+  if (sfx.ctx) {
+    if (sfx.ctx.state === "suspended") sfx.ctx.resume();
+    return;
+  }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return; // 音声合成が使えない環境では無音のまま遊べる
+  const ctx = new AC();
+  sfx.ctx = ctx;
+
+  // 全部の音はここ（master）に集まる。音量設定はここだけで効く。
+  // 最後に音割れ防止（大きすぎる音を自動で抑える）を通す。
+  sfx.master = ctx.createGain();
+  sfx.master.gain.value = audioVolume;
+  const limiter = ctx.createDynamicsCompressor();
+  // 初期設定のままだと小さな音まで強く潰してしまい、警報や射撃音が埋もれる。
+  // 割れそうな大音量のときだけ効くように、しきい値を高めにする。
+  limiter.threshold.value = -6;
+  limiter.knee.value = 6;
+  limiter.ratio.value = 8;
+  limiter.attack.value = 0.003;
+  limiter.release.value = 0.2;
+  sfx.master.connect(limiter);
+  limiter.connect(ctx.destination);
+
+  // 2秒分のノイズを1回だけ作り、使い回す
+  const len = ctx.sampleRate * 2;
+  sfx.noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const data = sfx.noiseBuf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+
+  const noise = () => {
+    const s = ctx.createBufferSource();
+    s.buffer = sfx.noiseBuf;
+    s.loop = true;
+    s.start(0, Math.random() * 2); // 再生位置をずらして、同じノイズ同士が揃わないように
+    return s;
+  };
+  const filter = (type, freq, q = 0.7) => {
+    const f = ctx.createBiquadFilter();
+    f.type = type;
+    f.frequency.value = freq;
+    f.Q.value = q;
+    return f;
+  };
+  const gain = (v = 0) => {
+    const g = ctx.createGain();
+    g.gain.value = v;
+    return g;
+  };
+  const osc = (type, freq) => {
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.value = freq;
+    o.start();
+    return o;
+  };
+  // a → b → c … → master の順につなぐ
+  const chain = (...nodes) => {
+    for (let i = 0; i < nodes.length - 1; i++) nodes[i].connect(nodes[i + 1]);
+    nodes[nodes.length - 1].connect(sfx.master);
+    return nodes;
+  };
+
+  // ジェット：低い轟音（ノイズを低く絞る）＋ タービンの高音
+  sfx.jetLP = filter("lowpass", 300);
+  sfx.jetGain = gain();
+  chain(noise(), sfx.jetLP, sfx.jetGain);
+  sfx.whine = osc("sine", 400);
+  sfx.whineGain = gain();
+  chain(sfx.whine, sfx.whineGain);
+  // アフターバーナー：さらに低く荒々しい轟音を重ねる
+  sfx.abGain = gain();
+  chain(noise(), filter("lowpass", 520, 1.2), sfx.abGain);
+
+  // レシプロ：わずかにずらした2つののこぎり波を混ぜ、エンジンの「ブロロロ」といううなりにする
+  sfx.prop1 = osc("sawtooth", 40);
+  sfx.prop2 = osc("sawtooth", 40.6);
+  sfx.propLP = filter("lowpass", 700);
+  sfx.propGain = gain();
+  sfx.prop1.connect(sfx.propLP);
+  sfx.prop2.connect(sfx.propLP);
+  chain(sfx.propLP, sfx.propGain);
+
+  // 風切り音：速いほど大きく、高い音に
+  sfx.windBP = filter("bandpass", 600, 0.6);
+  sfx.windGain = gain();
+  chain(noise(), sfx.windBP, sfx.windGain);
+
+  // 射撃音：ノイズを高速で断続させる（矩形波で音量を0と1に切り替える）。
+  // 断続の速さが発射速度。自分の銃と、近くの敵の銃（こもった音）を別々に持つ。
+  const makeGun = (bandFreq) => {
+    const am = gain(0.5);
+    const lfo = osc("square", 50);
+    const depth = gain(0.5);
+    lfo.connect(depth);
+    depth.connect(am.gain); // 0.5 ± 0.5 → 0〜1 で断続
+    const out = gain();
+    chain(noise(), filter("bandpass", bandFreq, 0.9), am, out);
+    return { lfo, out };
+  };
+  sfx.gunOwn = makeGun(1500);
+  sfx.gunFoe = makeGun(700);
+
+  // 失速警報：高めの断続音
+  sfx.stallGain = gain();
+  chain(osc("square", 880), filter("lowpass", 2500), sfx.stallGain);
+}
+["pointerdown", "keydown"].forEach((ev) => window.addEventListener(ev, initAudio));
+
+// 毎フレーム、ゲームの状況に合わせて各音の大きさ・高さを動かす（描画の直前に呼ぶ）
+function updateAudio() {
+  if (!sfx.ctx) return;
+  const now = sfx.ctx.currentTime;
+  // いきなり値を変えるとプツッと鳴るので、短い時間をかけて目標値へ寄せる
+  const to = (param, v, smooth = 0.06) => param.setTargetAtTime(v, now, smooth);
+
+  const p = player;
+  const flying = running && !gameOver && !!p && p.alive;
+  const thr = flying ? p.throttle : 0;
+  const speed = flying ? p.velocity.length() : 0;
+  const isProp = !!p && p.params.category === "prop";
+
+  // エンジン
+  const ab = Math.max(0, (thr - 0.85) / 0.15);
+  to(sfx.jetGain.gain, flying && !isProp ? 0.18 + thr * 0.22 : 0);
+  to(sfx.jetLP.frequency, 220 + thr * 1300);
+  to(sfx.whine.frequency, 320 + thr * 520);
+  to(sfx.whineGain.gain, flying && !isProp ? 0.012 + thr * 0.02 : 0);
+  to(sfx.abGain.gain, flying && !isProp ? ab * 0.45 : 0);
+  const rpm = 26 + thr * 48;
+  to(sfx.prop1.frequency, rpm);
+  to(sfx.prop2.frequency, rpm * 1.015);
+  to(sfx.propLP.frequency, 450 + thr * 900);
+  to(sfx.propGain.gain, flying && isProp ? 0.07 + thr * 0.09 : 0);
+
+  // 風切り音
+  const w = Math.min(1, speed / 320);
+  to(sfx.windGain.gain, flying ? w * w * 0.28 : 0);
+  to(sfx.windBP.frequency, 350 + speed * 2.5);
+
+  // 自分の射撃：曳光弾と同じ条件（狙う敵が射程の2倍以内）で撃ち続けている間だけ鳴る
+  const myFoe = flying ? nearestHostile(p) : null;
+  const iFire = !!myFoe && p.position.distanceTo(myFoe.position) <= TRACER_FIRE_RANGE;
+  to(sfx.gunOwn.out.gain, iFire ? 0.4 : 0, 0.015);
+  to(sfx.gunOwn.lfo.frequency, isProp ? 16 : 55); // 機関銃はダダダ、ジェットの機関砲はブーッ
+
+  // 敵の射撃：撃っている敵のうち一番近いものの音を、距離に応じた大きさで鳴らす
+  let foeDist = Infinity;
+  let foeIsProp = false;
+  if (running && !gameOver) {
+    for (const c of combatants) {
+      if (!c.alive || c === p || (p && c.team === p.team)) continue;
+      const target = nearestHostile(c);
+      if (!target || c.position.distanceTo(target.position) > TRACER_FIRE_RANGE) continue;
+      const d = c.position.distanceTo(camera.position);
+      if (d < foeDist) { foeDist = d; foeIsProp = c.params.category === "prop"; }
+    }
+  }
+  const foeVol = Number.isFinite(foeDist) ? Math.max(0, 1 - foeDist / 1500) ** 2 * 0.3 : 0;
+  to(sfx.gunFoe.out.gain, foeVol, 0.03);
+  to(sfx.gunFoe.lfo.frequency, foeIsProp ? 15 : 52);
+
+  // 失速警報：1秒に2回のピッ、ピッ
+  const beep = flying && p.hud.stall && (now * 4) % 2 < 1;
+  to(sfx.stallGain.gain, beep ? 0.09 : 0, 0.005);
+
+  to(sfx.master.gain, audioVolume, 0.05);
+}
+
+// 爆発音（撃墜の瞬間と、残骸が地面に落ちたとき）。遠いほど小さく、こもった音にする。
+// 音は光より遅く届くので、遠くの爆発ほど少し遅れて聞こえる（最大1秒）。
+function playExplosion(pos, size = 1) {
+  if (!sfx.ctx) return;
+  const ctx = sfx.ctx;
+  const d = camera.position.distanceTo(pos);
+  const vol = Math.max(0, 1 - d / 6000) ** 1.5 * size * 1.4;
+  if (vol < 0.01) return;
+  const t0 = ctx.currentTime + Math.min(d / 343, 1);
+
+  // ドーン：ノイズを、最初は明るく→だんだん低くこもらせながら消していく
+  const src = ctx.createBufferSource();
+  src.buffer = sfx.noiseBuf;
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  const top = 2200 - Math.min(d, 5000) * 0.3; // 遠いほど高い音が抜けてこもる
+  lp.frequency.setValueAtTime(top, t0);
+  lp.frequency.exponentialRampToValueAtTime(120, t0 + 1.8);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.9 * vol, t0 + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 2.6);
+  src.connect(lp).connect(g).connect(sfx.master);
+  src.start(t0, Math.random());
+  src.stop(t0 + 2.7);
+
+  // 腹に響く低音
+  const thump = ctx.createOscillator();
+  thump.type = "sine";
+  thump.frequency.setValueAtTime(70, t0);
+  thump.frequency.exponentialRampToValueAtTime(28, t0 + 0.9);
+  const tg = ctx.createGain();
+  tg.gain.setValueAtTime(0.0001, t0);
+  tg.gain.exponentialRampToValueAtTime(0.8 * vol, t0 + 0.01);
+  tg.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.0);
+  thump.connect(tg).connect(sfx.master);
+  thump.start(t0);
+  thump.stop(t0 + 1.1);
+}
+
+// 設定画面の音量スライダー
+const volumeSliderEl = document.getElementById("volumeSlider");
+const volumeValueEl = document.getElementById("volumeValue");
+volumeSliderEl.value = String(Math.round(audioVolume * 100));
+volumeValueEl.textContent = volumeSliderEl.value;
+volumeSliderEl.addEventListener("input", () => {
+  audioVolume = Number(volumeSliderEl.value) / 100;
+  volumeValueEl.textContent = volumeSliderEl.value;
+  try { localStorage.setItem(AUDIO_VOLUME_KEY, String(audioVolume)); } catch {}
+});
+
 window.__debug = { player, enemy, stepPhysics, AIRCRAFT_DB };
 </script>
 
